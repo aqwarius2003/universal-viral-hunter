@@ -1,0 +1,411 @@
+import asyncio
+import json
+import logging
+import re
+import time
+from typing import Any, Dict, List, Optional, Union
+import aiohttp
+from google import genai
+from google.genai import types
+
+try:
+    from google.genai.errors import ClientError, APIError
+except ImportError:
+    class ClientError(Exception):
+        code: int = 429
+    class APIError(Exception):
+        pass
+
+from src.ai.agents.state import AgentState
+from src.ai.rate_limiter import model_rate_limiter, get_model_interval
+from src.ai.schema import TweetSummary, ImageSelection
+from src.config import settings
+from src.db import update_tweet_status_and_score
+from src.utils.hashtags import normalize_hashtags
+
+logger = logging.getLogger("ai-viral-hunter.editor")
+
+client = genai.Client(api_key=settings.ai_api_key)
+
+
+def get_client() -> genai.Client:
+    global client
+    if client is None:
+        client = genai.Client(api_key=settings.ai_api_key)
+    return client
+
+
+_ai_status: Dict[str, Any] = {
+    "status": "pending",
+    "message": "Проверка состояния...",
+    "model": settings.ai_model_name,
+    "waiting_seconds": 0,
+    "last_updated": time.time(),
+}
+
+
+def get_ai_status() -> Dict[str, Any]:
+    """Returns current Gemini API readiness and rate limit status."""
+    _ai_status["model"] = settings.ai_model_name
+    _ai_status["primary_model"] = settings.primary_model
+    _ai_status["fallback_model"] = settings.fallback_model
+    _ai_status["delay_setting"] = settings.ai_request_delay_seconds
+    return dict(_ai_status)
+
+
+def set_ai_status(status: str, message: str, waiting_seconds: int = 0) -> None:
+    """Updates global AI API status state."""
+    _ai_status["status"] = status
+    _ai_status["message"] = message
+    _ai_status["waiting_seconds"] = waiting_seconds
+    _ai_status["last_updated"] = time.time()
+
+
+def is_rate_limit_error(e: Exception) -> bool:
+    """Checks if an exception indicates HTTP 429 / RESOURCE_EXHAUSTED quota limits."""
+    code = getattr(e, "code", None) or getattr(e, "status_code", None)
+    if code == 429 or code == "429":
+        return True
+    resp = getattr(e, "response_json", None)
+    if isinstance(resp, dict):
+        err_dict = resp.get("error", {})
+        if isinstance(err_dict, dict):
+            c = err_dict.get("code")
+            if c == 429 or c == "429":
+                return True
+            status = str(err_dict.get("status", "")).upper()
+            if "RESOURCE_EXHAUSTED" in status:
+                return True
+    err_str = str(e).upper()
+    return "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "QUOTA" in err_str
+
+
+def parse_json_safely(text: str) -> dict:
+    """Parses JSON response, safely stripping markdown code fences if present."""
+    cleaned = (text or "").strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    return json.loads(cleaned)
+
+
+async def download_image(session: aiohttp.ClientSession, url: str) -> Optional[tuple[bytes, str]]:
+    """Downloads an image from URL and returns (bytes, mime_type) or None."""
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            if resp.status == 200:
+                data = await resp.read()
+                content_type = resp.headers.get("Content-Type", "image/jpeg").split(";")[0].strip()
+                if not content_type.startswith("image/"):
+                    content_type = "image/jpeg"
+                return data, content_type
+    except Exception as err:
+        print(f"⚠️ Ошибка загрузки изображения {url}: {err}")
+    return None
+
+
+async def select_key_image(
+    text: str,
+    media_urls: List[str],
+    model: Optional[str] = None,
+) -> tuple[Optional[int], Optional[str]]:
+    """
+    Selects the most informative image from attached media URLs using the dedicated multimodal model.
+    Isolates image evaluation to avoid consuming the primary text model quota.
+    """
+    if not media_urls:
+        return None, None
+
+    if len(media_urls) == 1:
+        return 0, "Единственное прикрепленное изображение"
+
+    target_model = model or settings.fallback_model
+
+    async with aiohttp.ClientSession() as session:
+        tasks = [download_image(session, url) for url in media_urls[:4]]
+        downloaded = await asyncio.gather(*tasks)
+
+    image_parts = []
+    valid_indices = []
+    for idx, res in enumerate(downloaded):
+        if res is not None:
+            data, mime = res
+            part = types.Part.from_bytes(data=data, mime_type=mime)
+            image_parts.append(part)
+            valid_indices.append(idx)
+
+    if not valid_indices:
+        return None, "Не удалось загрузить изображения"
+
+    if len(valid_indices) == 1:
+        return valid_indices[0], "Единственное успешно загруженное изображение"
+
+    prompt_text = (
+        f"Context tweet: {text}\n\n"
+        f"There are {len(image_parts)} images attached (original indices: {valid_indices}). "
+        "Carefully evaluate them and select the single most informative image (e.g. architecture diagram, "
+        "benchmark graph, table, code sample). If one is informative, set `selected_image_index` to its original index "
+        "and provide `image_reason` in Russian. If none are informative, set `selected_image_index` to null."
+    )
+    contents = list(image_parts)
+    contents.append(prompt_text)
+
+    await model_rate_limiter.acquire(target_model, min_interval=get_model_interval())
+
+    try:
+        current_client = get_client()
+        set_ai_status("busy", f"Выбор ключевой картинки моделью {target_model}...")
+        response = await current_client.aio.models.generate_content(
+            model=target_model,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=(
+                    "You are an expert visual editor. "
+                    "Analyze attached tweet images and select the most informative one. "
+                    "Return strict JSON matching the schema with selected_image_index and image_reason in Russian."
+                ),
+                response_mime_type="application/json",
+                response_schema=ImageSelection,
+                temperature=0.1,
+            ),
+        )
+        parsed = parse_json_safely(response.text)
+        sel_idx = parsed.get("selected_image_index")
+        sel_reason = parsed.get("image_reason")
+        if sel_idx is not None and sel_idx not in valid_indices:
+            sel_idx = valid_indices[0]
+        set_ai_status("ok", f"Готов к работе ({settings.primary_model})")
+        return sel_idx, sel_reason
+    except ClientError as e:
+        logger.warning(f"⚠️ ClientError при анализе картинок на {target_model}: {e}")
+        return valid_indices[0], "Выбрано первое изображение (ошибка ИИ при выборе)"
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при анализе картинок на {target_model}: {e}")
+        return valid_indices[0], "Выбрано первое изображение"
+
+
+async def call_llm(
+    text: Optional[Union[str, Dict[str, Any]]] = None,
+    media_urls: Optional[List[str]] = None,
+    max_retries: int = 1,
+    **kwargs: Any,
+) -> Optional[dict]:
+    """
+    Two-model architecture with automatic fallback:
+    1. Key image selection (if multiple images) routed isolated to fallback model (gemini-3.1-flash-lite).
+    2. Text analysis and TweetSummary routed by default to primary model (gemini-3.5-flash-lite).
+    3. On HTTP 429 RESOURCE_EXHAUSTED on primary model, automatically pauses 2s and retries on fallback model.
+    4. If fallback model also returns 429, logs warning and returns None (skipping post without crashing).
+    """
+    tweet = kwargs.get("tweet")
+    if isinstance(text, dict):
+        tweet = text
+        text = tweet.get("text_raw", "")
+    elif text is not None and tweet is None:
+        tweet = {"text_raw": text}
+    elif tweet is not None and text is None:
+        text = tweet.get("text_raw", "")
+    elif tweet is None and text is None:
+        tweet = {"text_raw": ""}
+        text = ""
+
+    primary_model = settings.primary_model
+    fallback_model = settings.fallback_model
+
+    # Step 1: Multimodal image selection (isolated to fallback model if multiple images)
+    selected_img_idx: Optional[int] = None
+    selected_img_reason: Optional[str] = None
+    if media_urls:
+        if len(media_urls) > 1:
+            selected_img_idx, selected_img_reason = await select_key_image(
+                text=text,
+                media_urls=media_urls,
+                model=fallback_model,
+            )
+        elif len(media_urls) == 1:
+            selected_img_idx = 0
+            selected_img_reason = "Единственное прикрепленное изображение"
+
+    # Step 2: Prepare pure text prompt for TweetSummary
+    system_prompt = settings.editor_system_prompt
+    
+    author = tweet.get("author_handle", "") or tweet.get("author_name", "") or "Unknown"
+    date = tweet.get("created_at", "")
+    media_count = len(media_urls) if media_urls else 0
+    try:
+        prompt_text = settings.editor_prompt_template.format(
+            text=text,
+            author=author,
+            date=date,
+            media_count=media_count
+        )
+    except Exception:
+        prompt_text = f"Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}"
+
+    contents = [prompt_text]
+    config = types.GenerateContentConfig(
+        system_instruction=system_prompt,
+        response_mime_type="application/json",
+        response_schema=TweetSummary,
+        temperature=0.2,
+    )
+
+    current_client = get_client()
+
+    # Step 3: Attempt 1 - Primary Text Model
+    primary_429 = False
+    await model_rate_limiter.acquire(primary_model, min_interval=get_model_interval())
+    try:
+        set_ai_status("busy", f"Обработка запроса моделью {primary_model}...")
+        response = await current_client.aio.models.generate_content(
+            model=primary_model,
+            contents=contents,
+            config=config,
+        )
+        parsed_dict = parse_json_safely(response.text)
+        if "hashtags" in parsed_dict:
+            parsed_dict["hashtags"] = normalize_hashtags(parsed_dict["hashtags"])
+        parsed_dict["selected_image_index"] = selected_img_idx
+        parsed_dict["image_reason"] = selected_img_reason
+        set_ai_status("ok", f"Готов к работе ({primary_model})")
+        return parsed_dict
+    except ClientError as e:
+        if is_rate_limit_error(e):
+            primary_429 = True
+            msg = f"⏳ Достигнут лимит 429 RESOURCE_EXHAUSTED на {primary_model}. Пауза 2с перед fallback на {fallback_model}..."
+            print(msg)
+            logger.warning(msg)
+            set_ai_status("waiting", msg, waiting_seconds=2)
+            await asyncio.sleep(2)
+        else:
+            set_ai_status("error", f"Ошибка Gemini API ({primary_model}): {e}")
+            raise
+    except Exception as e:
+        if is_rate_limit_error(e):
+            primary_429 = True
+            msg = f"⏳ Лимит 429 на {primary_model}: {e}. Пауза 2с перед fallback на {fallback_model}..."
+            print(msg)
+            logger.warning(msg)
+            set_ai_status("waiting", msg, waiting_seconds=2)
+            await asyncio.sleep(2)
+        else:
+            set_ai_status("error", f"Ошибка Gemini API ({primary_model}): {e}")
+            raise
+
+    # Step 4: Attempt 2 - Fallback Model
+    if primary_429:
+        await model_rate_limiter.acquire(fallback_model, min_interval=get_model_interval())
+        try:
+            set_ai_status("busy", f"Обработка запроса резервной моделью {fallback_model}...")
+            response = await current_client.aio.models.generate_content(
+                model=fallback_model,
+                contents=contents,
+                config=config,
+            )
+            parsed_dict = parse_json_safely(response.text)
+            if "hashtags" in parsed_dict:
+                parsed_dict["hashtags"] = normalize_hashtags(parsed_dict["hashtags"])
+            parsed_dict["selected_image_index"] = selected_img_idx
+            parsed_dict["image_reason"] = selected_img_reason
+            set_ai_status("ok", f"Готов к работе ({fallback_model})")
+            return parsed_dict
+        except ClientError as e:
+            if is_rate_limit_error(e):
+                warn_msg = f"⚠️ Резервная модель {fallback_model} также вернула 429 RESOURCE_EXHAUSTED. Пропуск поста."
+                print(warn_msg)
+                logger.warning(warn_msg)
+                set_ai_status("waiting", warn_msg, waiting_seconds=4)
+                return None
+            else:
+                set_ai_status("error", f"Ошибка резервной модели ({fallback_model}): {e}")
+                raise
+        except Exception as e:
+            if is_rate_limit_error(e):
+                warn_msg = f"⚠️ Резервная модель {fallback_model} также вернула 429 RESOURCE_EXHAUSTED: {e}. Пропуск поста."
+                print(warn_msg)
+                logger.warning(warn_msg)
+                set_ai_status("waiting", warn_msg, waiting_seconds=4)
+                return None
+            else:
+                set_ai_status("error", f"Ошибка резервной модели ({fallback_model}): {e}")
+                raise
+
+    return None
+
+
+async def editor_node(state: AgentState) -> Dict[str, Any]:
+    """
+    Editor Agent: Generates Russian summaries and evaluates images for viral tweets using Gemini.
+    Sorts drafts in descending order of combined_score (viral_score * impact_score).
+    Skips posts without crashing if quotas are exhausted.
+    """
+    viral_tweets = state.get("viral_tweets", [])
+    draft_posts = state.get("draft_posts", [])
+    validation_errors = state.get("validation_errors", [])
+
+    # Identify tweet IDs that failed critic validation
+    failed_tweet_ids = set()
+    for err in validation_errors:
+        if err.startswith("Tweet "):
+            parts = err.split(":")
+            if parts:
+                tid = parts[0].replace("Tweet ", "").strip()
+                failed_tweet_ids.add(tid)
+
+    # Keep only valid existing drafts
+    kept_drafts = [d for d in draft_posts if d["tweet_id"] not in failed_tweet_ids]
+    processed_ids = {draft["tweet_id"] for draft in kept_drafts}
+    new_drafts = []
+
+    for idx, tweet in enumerate(viral_tweets):
+        if tweet["tweet_id"] in processed_ids:
+            continue
+
+        print(f"🤖 Отправляю твит {tweet['tweet_id']} на анализ в Gemini ({settings.primary_model})...")
+        media_urls = tweet.get("media_urls", [])
+        ai_response_dict = await call_llm(tweet.get("text_raw", ""), media_urls=media_urls)
+
+        if ai_response_dict is None:
+            warn_msg = f"⚠️ Пропуск поста {tweet['tweet_id']} без падения скрипта (квоты 429 исчерпаны на обеих моделях)."
+            print(warn_msg)
+            logger.warning(warn_msg)
+            continue
+
+        if "hashtags" in ai_response_dict:
+            ai_response_dict["hashtags"] = normalize_hashtags(ai_response_dict["hashtags"])
+
+        impact_score = ai_response_dict.get("impact_score", 1)
+        viral_score = tweet.get("viral_score", 0.0)
+        combined_score = viral_score * impact_score
+
+        # Persist generated Russian summary into DB immediately
+        await update_tweet_status_and_score(
+            tweet_id=tweet["tweet_id"],
+            score=viral_score,
+            is_viral=True,
+            status="PROCESSED",
+            impact_score=impact_score,
+            summary_json=json.dumps(ai_response_dict, ensure_ascii=False),
+        )
+
+        draft = {
+            "tweet_id": tweet["tweet_id"],
+            "original_data": tweet,
+            "ai_data": ai_response_dict,
+            "combined_score": combined_score,
+        }
+        new_drafts.append(draft)
+
+    all_drafts = list(kept_drafts) + new_drafts
+
+    # Sort all drafts by combined_score descending
+    all_drafts.sort(
+        key=lambda d: d.get(
+            "combined_score",
+            d.get("original_data", {}).get("viral_score", 0.0)
+            * d.get("ai_data", {}).get("impact_score", 1),
+        ),
+        reverse=True,
+    )
+
+    return {"draft_posts": all_drafts}

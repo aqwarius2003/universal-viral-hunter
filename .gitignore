@@ -1,0 +1,53 @@
+# 🔐 Security & Environments (DOD-6)
+.env
+.env.*
+!.env.example
+
+# 📦 Poetry & Virtual Environments
+.venv/
+venv/
+env/
+
+# 💾 Database
+*.sqlite
+*.sqlite3
+*.db
+tweets.sqlite
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# 🧪 Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 💻 IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+cookies.json
+data/

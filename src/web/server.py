@@ -1,0 +1,1637 @@
+import asyncio
+from datetime import datetime, timezone
+import json
+import os
+from pathlib import Path
+import re
+import sys
+from typing import Any, Dict, List, Optional
+from aiohttp import web
+
+# Set up Windows console encoding if needed
+if sys.platform == "win32":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
+from src.ai.agents.publisher import format_telegram_post
+from src.utils.hashtags import normalize_hashtags, enforce_hashtags_in_post
+from src.config import settings
+from src.auth import (
+    create_session_token,
+    decode_session_token,
+    LoginRateLimiter,
+    mask_secret,
+)
+from src.db import (
+    auto_schedule_queue,
+    cancel_scheduled_post,
+    get_published_posts,
+    get_queued_posts,
+    get_recent_pipeline_runs,
+    get_tweet_by_id,
+    init_db,
+    mark_post_published,
+    reorder_queue,
+    update_post_content,
+    update_post_schedule,
+    create_user,
+    authenticate_user,
+    get_user_by_username,
+    get_all_users,
+    update_user_password,
+    delete_user,
+    get_user_count,
+    save_system_settings_dual,
+    load_system_settings_into_config,
+    export_tweets_data_stream,
+    delete_historical_data,
+    get_staging_tweets,
+    create_digest_draft,
+    publish_digest,
+    get_digests_list,
+    normalize_to_utc_iso,
+)
+from src.digest import run_daily_digest
+from src.main import run_pipeline
+from src.telegram.sender import send_photo_to_channel, send_post_to_channel
+from src.ai.agents.scout import (
+    get_twitter_client,
+    load_cookies_from_file,
+    server_twitter_login,
+)
+
+STATIC_DIR = Path(__file__).parent / "static"
+
+login_limiter = LoginRateLimiter(max_attempts=5, window_seconds=300, lockout_seconds=900)
+
+
+def get_client_ip(request: web.Request) -> str:
+    """Extracts client IP address respecting X-Forwarded-For if present."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote or "127.0.0.1"
+
+
+@web.middleware
+async def auth_middleware(request: web.Request, handler):
+    """
+    Authentication & Role-Based Access Control (RBAC) middleware.
+    Protects API routes, extracts HMAC session tokens, and validates roles.
+    """
+    path = request.path
+
+    # 1. Public resources (SPA UI, static files, favicon)
+    if path in ("/", "/favicon.ico") or path.startswith("/static/"):
+        return await handler(request)
+
+    # 2. Public auth endpoints
+    public_api_paths = (
+        "/api/auth/setup_status",
+        "/api/auth/setup",
+        "/api/auth/login",
+        "/api/auth/logout",
+        "/api/auth/me",
+    )
+    if path in public_api_paths:
+        return await handler(request)
+
+    # 3. Global bypass if auth is disabled in settings (e.g. testing)
+    if not getattr(settings, "auth_enabled", True):
+        request["user"] = {"username": "admin", "role": "admin"}
+        return await handler(request)
+
+    # 4. Extract token from Bearer header or session_id cookie
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    elif "session_id" in request.cookies:
+        token = request.cookies.get("session_id")
+
+    payload = decode_session_token(token, settings.secret_key) if token else None
+    if not payload:
+        await init_db()
+        user_count = await get_user_count()
+        if user_count == 0:
+            return web.json_response(
+                {"error": "Setup required", "needs_setup": True},
+                status=401,
+            )
+        return web.json_response({"error": "Unauthorized"}, status=401)
+
+    request["user"] = payload
+
+    # 5. Role-based restrictions (RBAC)
+    role = payload.get("role", "editor")
+    admin_only_prefixes = (
+        "/api/settings",
+        "/api/users",
+        "/api/twitter/login",
+        "/api/system/backup",
+    )
+    if any(path.startswith(p) for p in admin_only_prefixes):
+        if role != "admin":
+            return web.json_response(
+                {"error": "Forbidden: Requires Admin privileges"},
+                status=403,
+            )
+
+    return await handler(request)
+
+
+async def handle_index(request: web.Request) -> web.Response:
+    """Serves the main SPA index.html."""
+    html_path = STATIC_DIR / "index.html"
+    if not html_path.is_file():
+        return web.Response(text="index.html not found", status=404)
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    return web.Response(text=content, content_type="text/html", charset="utf-8")
+
+
+async def handle_favicon(request: web.Request) -> web.Response:
+    """Returns a simple modern SVG lightning bolt favicon."""
+    svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#24a1de"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>'
+    return web.Response(text=svg, content_type="image/svg+xml", charset="utf-8")
+
+
+import time
+
+_failed_summaries: Dict[str, float] = {}  # tweet_id -> last_failed_timestamp
+_in_progress_summaries: set = set()
+
+async def _generate_summary_for_tweet(p: Dict[str, Any], force: bool = False) -> Optional[Dict[str, Any]]:
+    """Helper to generate and persist summary for a single tweet dictionary."""
+    tweet_id = str(p.get("tweet_id"))
+    now = time.time()
+    
+    if not force:
+        # If failed recently (< 5 minutes ago), skip to prevent quota exhaustion loops
+        last_failed = _failed_summaries.get(tweet_id, 0)
+        if now - last_failed < 300:
+            return None
+
+    if tweet_id in _in_progress_summaries:
+        return None
+
+    _in_progress_summaries.add(tweet_id)
+    try:
+        from src.ai.agents.editor import call_llm
+        from src.db import update_tweet_status_and_score
+
+        print(f"🤖 Генерация русского саммари для поста {tweet_id}...")
+        media_urls = p.get("media_urls", [])
+        ai_data = await call_llm(p["text_raw"], media_urls=media_urls)
+        if not ai_data:
+            print(f"⚠️ Саммари не сформировано для {tweet_id} (квоты 429 исчерпаны).")
+            return None
+        if "hashtags" in ai_data:
+            ai_data["hashtags"] = normalize_hashtags(ai_data["hashtags"])
+        p["summary_data"] = ai_data
+        p["impact_score"] = ai_data.get("impact_score", 7)
+        summary_json_str = json.dumps(ai_data, ensure_ascii=False)
+        await update_tweet_status_and_score(
+            tweet_id=tweet_id,
+            score=p.get("viral_score", 0.0),
+            is_viral=True,
+            status=p.get("status", "PROCESSED"),
+            impact_score=p["impact_score"],
+            summary_json=summary_json_str,
+        )
+        _failed_summaries.pop(tweet_id, None)
+        return ai_data
+    except Exception as e:
+        _failed_summaries[tweet_id] = now
+        print(f"⚠️ Ошибка генерации саммари для {tweet_id}: {e}")
+        return None
+    finally:
+        _in_progress_summaries.discard(tweet_id)
+
+
+async def _ensure_russian_summaries(posts: List[Dict[str, Any]]) -> None:
+    """Ensures all posts have structured Russian summaries generated by Gemini safely without quota exhaustion."""
+    missing = [p for p in posts if not p.get("summary_data") and p.get("text_raw")]
+    if not missing:
+        return
+
+    # Process at most 2 missing summaries per request to prevent hitting rate limits
+    for p in missing[:2]:
+        await _generate_summary_for_tweet(p, force=False)
+        await asyncio.sleep(0.5)
+
+
+async def handle_get_queue(request: web.Request) -> web.Response:
+    """Returns list of pending and scheduled posts with Russian summaries."""
+    await init_db()
+    posts = await get_queued_posts()
+    await _ensure_russian_summaries(posts)
+    return web.json_response(posts)
+
+
+async def handle_get_published(request: web.Request) -> web.Response:
+    """Returns list of published posts with Russian summaries."""
+    await init_db()
+    limit = int(request.query.get("limit", 50))
+    posts = await get_published_posts(limit=limit)
+    await _ensure_russian_summaries(posts)
+    return web.json_response(posts)
+
+
+async def handle_update_schedule(request: web.Request) -> web.Response:
+    """Updates scheduled_at for a post."""
+    tweet_id = request.match_info["id"]
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    scheduled_at = data.get("scheduled_at")
+    await init_db()
+    await update_post_schedule(tweet_id, scheduled_at)
+    return web.json_response({"status": "success", "tweet_id": tweet_id, "scheduled_at": scheduled_at})
+
+
+async def handle_auto_schedule(request: web.Request) -> web.Response:
+    """Automatically assigns spaced publication times for all queued posts."""
+    await init_db()
+    interval = settings.scheduler_interval_minutes
+    tz_offset_minutes = None
+    try:
+        data = await request.json()
+        if isinstance(data, dict):
+            tz_offset_minutes = data.get("tz_offset_minutes")
+    except Exception:
+        pass
+
+    posts = await auto_schedule_queue(
+        interval_minutes=interval,
+        start_offset_minutes=30,
+        tz_offset_minutes=tz_offset_minutes,
+    )
+    return web.json_response({"status": "success", "count": len(posts), "posts": posts})
+
+
+async def handle_reorder_queue(request: web.Request) -> web.Response:
+    """Updates the queue ordering."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    ordered_ids = data.get("ordered_ids", [])
+    if not isinstance(ordered_ids, list):
+        return web.json_response({"error": "ordered_ids must be a list"}, status=400)
+
+    await init_db()
+    await reorder_queue(ordered_ids)
+    return web.json_response({"status": "success", "count": len(ordered_ids)})
+
+
+async def handle_publish_now(request: web.Request) -> web.Response:
+    """Immediately publishes the post to Telegram."""
+    tweet_id = request.match_info["id"]
+    await init_db()
+    tweet = await get_tweet_by_id(tweet_id)
+    if not tweet:
+        return web.json_response({"error": "Post not found"}, status=404)
+
+    summary_data = tweet.get("summary_data") or {
+        "title_ru": tweet.get("text_raw", "")[:60],
+        "summary_ru": tweet.get("text_raw", ""),
+        "takeaways": ["Ключевая новость из X.com"],
+        "hashtags": ["#AI", "#Tech"],
+        "impact_score": tweet.get("impact_score", 7),
+    }
+
+    media_urls = tweet.get("media_urls", [])
+    selected_idx = summary_data.get("selected_image_index")
+    photo_url = None
+    if selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
+        photo_url = media_urls[selected_idx]
+    elif media_urls and selected_idx == 0:
+        photo_url = media_urls[0]
+
+    if isinstance(summary_data, dict):
+        raw_h = (
+            summary_data.get("hashtags")
+            or summary_data.get("hash_tags")
+            or summary_data.get("tags")
+            or summary_data.get("keywords")
+        )
+        if raw_h is not None:
+            summary_data["hashtags"] = normalize_hashtags(raw_h)
+
+    formatted_text = format_telegram_post(tweet, summary_data, is_photo=bool(photo_url))
+    formatted_text = enforce_hashtags_in_post(formatted_text)
+    tweet_url = tweet.get("tweet_url", "https://x.com")
+
+    try:
+        if photo_url:
+            await send_photo_to_channel(formatted_text, photo_url, tweet_url)
+        else:
+            await send_post_to_channel(formatted_text, tweet_url)
+
+        await mark_post_published(tweet_id)
+        return web.json_response({"status": "published", "tweet_id": tweet_id})
+    except Exception as e:
+        error_msg = str(e)
+        print(f"❌ Ошибка публикации поста {tweet_id}: {error_msg}")
+        return web.json_response({"error": error_msg, "tweet_id": tweet_id}, status=400)
+
+
+async def handle_edit_post(request: web.Request) -> web.Response:
+    """Updates post content (title, summary, takeaways, hashtags, selected photo, scheduled_at)."""
+    tweet_id = request.match_info["id"]
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    title_ru = data.get("title_ru", "").strip()
+    summary_ru = data.get("summary_ru", "").strip()
+    takeaways = data.get("takeaways", [])
+    hashtags = normalize_hashtags(data.get("hashtags", []))
+    selected_image_index = data.get("selected_image_index")
+    impact_score = data.get("impact_score")
+
+    if not title_ru or not summary_ru:
+        return web.json_response({"error": "Title and summary cannot be empty"}, status=400)
+
+    await init_db()
+    await update_post_content(
+        tweet_id=tweet_id,
+        title_ru=title_ru,
+        summary_ru=summary_ru,
+        takeaways=takeaways,
+        hashtags=hashtags,
+        selected_image_index=selected_image_index,
+        impact_score=impact_score,
+    )
+
+    if "scheduled_at" in data:
+        scheduled_at = data.get("scheduled_at")
+        await update_post_schedule(tweet_id, scheduled_at)
+
+    return web.json_response({"status": "updated", "tweet_id": tweet_id})
+
+
+async def handle_delete_post(request: web.Request) -> web.Response:
+    """Cancels and archives a post."""
+    tweet_id = request.match_info["id"]
+    await init_db()
+    await cancel_scheduled_post(tweet_id)
+    return web.json_response({"status": "cancelled", "tweet_id": tweet_id})
+
+
+from src.ai.agents.editor import get_ai_status, set_ai_status
+
+async def handle_get_status(request: web.Request) -> web.Response:
+    """Returns real-time status of AI models and rate limiting."""
+    status_info = get_ai_status()
+    return web.json_response(status_info)
+
+
+# --- Authentication Endpoints ---
+
+async def handle_setup_status(request: web.Request) -> web.Response:
+    """Checks whether the system requires initial setup (0 users)."""
+    await init_db()
+    count = await get_user_count()
+    return web.json_response({
+        "needs_setup": count == 0,
+        "user_count": count,
+        "is_configured": settings.is_configured(),
+    })
+
+
+async def handle_setup(request: web.Request) -> web.Response:
+    """Performs initial admin account creation and optional settings configuration."""
+    await init_db()
+    count = await get_user_count()
+    if count > 0:
+        return web.json_response({"error": "Первичная настройка уже завершена"}, status=403)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", ""))
+
+    if len(username) < 3:
+        return web.json_response({"error": "Имя пользователя должно содержать минимум 3 символа"}, status=400)
+    if len(password) < 8:
+        return web.json_response({"error": "Пароль должен содержать минимум 8 символов"}, status=400)
+
+    try:
+        user = await create_user(username, password, role="admin")
+    except Exception as e:
+        return web.json_response({"error": f"Ошибка создания администратора: {e}"}, status=400)
+
+    initial_settings: Dict[str, Any] = {}
+    for key in (
+        "ai_api_key",
+        "ai_model_name",
+        "telegram_bot_token",
+        "telegram_channel_id",
+        "twitter_username",
+        "twitter_email",
+        "twitter_password",
+        "twitter_proxy_url",
+    ):
+        if key in data and data[key] and not str(data[key]).startswith("***"):
+            initial_settings[key] = data[key]
+
+    if initial_settings:
+        await save_system_settings_dual(initial_settings)
+
+    token = create_session_token(user["username"], user["role"], settings.secret_key)
+    response = web.json_response({
+        "status": "setup_completed",
+        "user": {"username": user["username"], "role": user["role"]},
+        "token": token,
+    })
+    response.set_cookie(
+        "session_id",
+        token,
+        max_age=14 * 86400,
+        httponly=True,
+        samesite="Lax",
+        path="/"
+    )
+    return response
+
+
+async def handle_login(request: web.Request) -> web.Response:
+    """Authenticates user credentials with brute-force rate limiting."""
+    ip = get_client_ip(request)
+    if login_limiter.is_locked(ip):
+        rem = login_limiter.lockout_remaining(ip)
+        return web.json_response(
+            {"error": f"Слишком много неудачных попыток. Попробуйте через {rem} сек."},
+            status=429,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", ""))
+
+    await init_db()
+    user = await authenticate_user(username, password)
+    if not user:
+        login_limiter.record_failure(ip)
+        return web.json_response({"error": "Неверный логин или пароль"}, status=401)
+
+    login_limiter.reset(ip)
+    token = create_session_token(user["username"], user["role"], settings.secret_key)
+    response = web.json_response({
+        "status": "authenticated",
+        "user": {"id": user["id"], "username": user["username"], "role": user["role"]},
+        "token": token,
+    })
+    response.set_cookie(
+        "session_id",
+        token,
+        max_age=14 * 86400,
+        httponly=True,
+        samesite="Lax",
+        path="/"
+    )
+    return response
+
+
+async def handle_logout(request: web.Request) -> web.Response:
+    """Terminates active session."""
+    response = web.json_response({"status": "logged_out"})
+    response.del_cookie("session_id", path="/")
+    return response
+
+
+async def handle_me(request: web.Request) -> web.Response:
+    """Returns currently authenticated user profile."""
+    token = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    elif "session_id" in request.cookies:
+        token = request.cookies.get("session_id")
+
+    payload = decode_session_token(token, settings.secret_key) if token else None
+    if not payload:
+        return web.json_response({"authenticated": False, "user": None})
+
+    await init_db()
+    db_user = await get_user_by_username(payload["username"])
+    if not db_user:
+        return web.json_response({"authenticated": False, "user": None})
+
+    return web.json_response({
+        "authenticated": True,
+        "user": {
+            "id": db_user["id"],
+            "username": db_user["username"],
+            "role": db_user["role"],
+            "last_login": db_user.get("last_login"),
+        }
+    })
+
+
+# --- User Management Endpoints (Admin Only) ---
+
+async def handle_get_users(request: web.Request) -> web.Response:
+    """Returns list of registered users."""
+    await init_db()
+    users = await get_all_users()
+    return web.json_response(users)
+
+
+async def handle_create_user(request: web.Request) -> web.Response:
+    """Creates a new user (Admin or Editor)."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    username = str(data.get("username", "")).strip()
+    password = str(data.get("password", ""))
+    role = str(data.get("role", "editor")).strip()
+
+    if len(username) < 3:
+        return web.json_response({"error": "Имя пользователя должно содержать от 3 символов"}, status=400)
+    if len(password) < 8:
+        return web.json_response({"error": "Пароль должен содержать от 8 символов"}, status=400)
+    if role not in ("admin", "editor"):
+        return web.json_response({"error": "Роль должна быть 'admin' или 'editor'"}, status=400)
+
+    await init_db()
+    try:
+        new_user = await create_user(username, password, role=role)
+        return web.json_response(new_user, status=201)
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+    except Exception as e:
+        return web.json_response({"error": f"Ошибка создания пользователя: {e}"}, status=400)
+
+
+async def handle_update_user_password(request: web.Request) -> web.Response:
+    """Updates password for a user."""
+    target_username = request.match_info["username"]
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    new_password = str(data.get("password", ""))
+    if len(new_password) < 8:
+        return web.json_response({"error": "Пароль должен содержать минимум 8 символов"}, status=400)
+
+    await init_db()
+    try:
+        success = await update_user_password(target_username, new_password)
+        if not success:
+            return web.json_response({"error": "Пользователь не найден"}, status=404)
+        return web.json_response({"status": "password_updated", "username": target_username})
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+
+async def handle_delete_user(request: web.Request) -> web.Response:
+    """Deletes a user, guarding the last remaining admin."""
+    target_username = request.match_info["username"]
+    current_user = request.get("user", {})
+    if current_user.get("username") == target_username:
+        return web.json_response({"error": "Нельзя удалить текущего авторизованного пользователя"}, status=400)
+
+    await init_db()
+    try:
+        success = await delete_user(target_username)
+        if not success:
+            return web.json_response({"error": "Пользователь не найден"}, status=404)
+        return web.json_response({"status": "deleted", "username": target_username})
+    except ValueError as e:
+        return web.json_response({"error": str(e)}, status=400)
+
+
+# --- Twitter Login & Database Backup Endpoints ---
+
+async def handle_twitter_login(request: web.Request) -> web.Response:
+    """Performs server-side login to X.com to avoid geo-blocking and generates cookies."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    auth_info_1 = str(data.get("auth_info_1") or data.get("username") or settings.twitter_username or "").strip()
+    password = str(data.get("password") or settings.twitter_password or "")
+    auth_info_2 = str(data.get("auth_info_2") or data.get("email") or settings.twitter_email or "").strip() or None
+    code = str(data.get("code") or "").strip() or None
+    proxy_url = data.get("proxy_url")
+
+    if proxy_url:
+        settings.twitter_proxy_url = str(proxy_url).strip()
+        await save_system_settings_dual({"twitter_proxy_url": settings.twitter_proxy_url})
+
+    if not auth_info_1 or not password:
+        return web.json_response({"error": "Необходимо указать логин (username/email) и пароль"}, status=400)
+
+    res = await server_twitter_login(
+        auth_info_1=auth_info_1,
+        password=password,
+        auth_info_2=auth_info_2,
+        code=code,
+    )
+
+    if res.get("status") in ("ok", "success"):
+        updates = {"twitter_username": auth_info_1}
+        if auth_info_2:
+            updates["twitter_email"] = auth_info_2
+        await save_system_settings_dual(updates)
+        return web.json_response({**res, "status": "ok"})
+    elif res.get("status") in ("code_required", "challenge_required"):
+        return web.json_response({**res, "status": "code_required"}, status=200)
+    else:
+        return web.json_response(res, status=400)
+
+
+async def handle_system_backup(request: web.Request) -> web.Response:
+    """Downloads the active SQLite database file as a backup."""
+    db_file = Path(settings.db_path)
+    if not db_file.is_file():
+        return web.json_response({"error": "Файл базы данных не найден"}, status=404)
+    return web.FileResponse(
+        db_file,
+        headers={"Content-Disposition": 'attachment; filename="tweets_backup.sqlite"'}
+    )
+
+
+# --- Settings Endpoints (Admin Only) ---
+
+async def handle_get_settings(request: web.Request) -> web.Response:
+    """Returns active settings with sensitive credentials masked."""
+    return web.json_response({
+        "min_viral_score": settings.min_viral_score,
+        "super_viral_threshold": getattr(settings, "super_viral_threshold", 100.0),
+        "max_posts_per_run": settings.max_posts_per_run,
+        "scheduler_interval_minutes": settings.scheduler_interval_minutes,
+        "ai_request_delay_seconds": settings.ai_request_delay_seconds,
+        "daily_digest_enabled": settings.daily_digest_enabled,
+        "daily_digest_time": settings.daily_digest_time,
+        "quiet_hours_enabled": settings.quiet_hours_enabled,
+        "quiet_hours_start": settings.quiet_hours_start,
+        "quiet_hours_end": settings.quiet_hours_end,
+        "digest_pre_sleep_minutes": settings.digest_pre_sleep_minutes,
+        "digest_block_interval_minutes": settings.digest_block_interval_minutes,
+        "daytime_publish_interval_minutes": settings.daytime_publish_interval_minutes,
+        "ai_model_name": settings.ai_model_name,
+        "telegram_channel_id": settings.telegram_channel_id or "",
+        "ai_api_key": mask_secret(settings.ai_api_key),
+        "telegram_bot_token": mask_secret(settings.telegram_bot_token),
+        "twitter_username": settings.twitter_username or "",
+        "twitter_email": settings.twitter_email or "",
+        "twitter_password": mask_secret(settings.twitter_password) if settings.twitter_password else "",
+        "twitter_proxy_url": settings.twitter_proxy_url or "",
+        "is_configured": settings.is_configured(),
+        "x_search_queries": getattr(settings, "x_search_queries", ""),
+        "x_relevance_prompt": getattr(settings, "x_relevance_prompt", ""),
+        "scout_interval_minutes": getattr(settings, "scout_interval_minutes", 15),
+        "editor_system_prompt": getattr(settings, "editor_system_prompt", ""),
+        "editor_prompt_template": getattr(settings, "editor_prompt_template", ""),
+        "show_metric_likes": getattr(settings, "show_metric_likes", True),
+        "show_metric_reposts": getattr(settings, "show_metric_reposts", True),
+        "show_metric_views": getattr(settings, "show_metric_views", True),
+        "show_metric_impact": getattr(settings, "show_metric_impact", True),
+        "show_metric_author": getattr(settings, "show_metric_author", True),
+        "show_metric_hashtags": getattr(settings, "show_metric_hashtags", True),
+        "show_metric_source_btn": getattr(settings, "show_metric_source_btn", True),
+        "max_digest_items": getattr(settings, "max_digest_items", 10),
+        "queue_sort_strategy": getattr(settings, "queue_sort_strategy", "BY_VIRAL_SCORE"),
+        "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
+        "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
+        "app_timezone": getattr(settings, "app_timezone", "auto"),
+    })
+
+
+def update_env_file(key_values: Dict[str, Any], env_path: Optional[str] = None) -> None:
+    """Updates values in .env file safely, guarding existing secrets and isolating tests."""
+    from src.db import is_secret_placeholder_or_empty
+    target = env_path or os.environ.get("ENV_FILE_PATH") or getattr(settings, "env_file_path", ".env")
+    env_p = Path(target).resolve()
+    repo_env = (Path(__file__).resolve().parent.parent / ".env").resolve()
+    is_testing = bool(
+        os.environ.get("PYTEST_CURRENT_TEST")
+        or os.environ.get("TESTING")
+        or "pytest" in sys.modules
+    )
+
+    if is_testing:
+        if not os.environ.get("ENV_FILE_PATH") and not env_path:
+            return
+        if env_p == repo_env:
+            return
+
+    if env_p.is_file():
+        try:
+            import shutil
+            shutil.copy2(str(env_p), f"{env_p}.bak")
+        except Exception:
+            pass
+
+    if not env_p.is_file():
+        lines = [f"{k}={v}\n" for k, v in key_values.items() if v is not None and not is_secret_placeholder_or_empty(k, v)]
+        with open(env_p, "w", encoding="utf-8") as f:
+            f.writelines(lines)
+        return
+
+    with open(env_p, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    for k, v in key_values.items():
+        if v is None or is_secret_placeholder_or_empty(k, v):
+            continue
+        pattern = re.compile(rf"^{k}=.*$", re.MULTILINE)
+        if pattern.search(content):
+            content = pattern.sub(f"{k}={v}", content)
+        else:
+            content += f"\n{k}={v}"
+
+    with open(env_p, "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+async def handle_update_settings(request: web.Request) -> web.Response:
+    """Saves updated settings to SQLite and .env and updates runtime object."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    db_updates: Dict[str, Any] = {}
+
+    def is_unmasked(val: Any) -> bool:
+        if not val:
+            return False
+        s = str(val).strip()
+        if not s or "*" in s or "..." in s or "•••" in s:
+            return False
+        return True
+
+    if "min_viral_score" in data:
+        db_updates["min_viral_score"] = float(data["min_viral_score"])
+
+    if "super_viral_threshold" in data:
+        db_updates["super_viral_threshold"] = float(data["super_viral_threshold"])
+
+    if "max_posts_per_run" in data:
+        db_updates["max_posts_per_run"] = int(data["max_posts_per_run"])
+
+    if "scheduler_interval_minutes" in data:
+        db_updates["scheduler_interval_minutes"] = int(data["scheduler_interval_minutes"])
+
+    if "ai_request_delay_seconds" in data:
+        db_updates["ai_request_delay_seconds"] = max(0, int(data["ai_request_delay_seconds"]))
+
+    if "daily_digest_enabled" in data:
+        db_updates["daily_digest_enabled"] = bool(data["daily_digest_enabled"])
+
+    if "daily_digest_time" in data:
+        raw_digest_time = str(data["daily_digest_time"]).strip()
+        from src.scheduler import normalize_schedule_times
+        cleaned_list = normalize_schedule_times(raw_digest_time)
+        cleaned_times = ", ".join(cleaned_list)
+        if cleaned_times:
+            db_updates["daily_digest_time"] = cleaned_times
+    def normalize_time(t_str: str) -> str:
+        t_str = t_str.strip().lower()
+        if not t_str:
+            return ""
+        is_pm = "pm" in t_str
+        is_am = "am" in t_str
+        t_str = t_str.replace("am", "").replace("pm", "").strip()
+        parts = t_str.split(":")
+        try:
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            if is_pm and h < 12:
+                h += 12
+            if is_am and h == 12:
+                h = 0
+            return f"{h:02d}:{m:02d}"
+        except Exception:
+            return ""
+
+    if "quiet_hours_enabled" in data:
+        db_updates["quiet_hours_enabled"] = bool(data["quiet_hours_enabled"])
+
+    if "quiet_hours_start" in data:
+        qh_start = normalize_time(str(data["quiet_hours_start"]))
+        if qh_start:
+            db_updates["quiet_hours_start"] = qh_start
+
+    if "quiet_hours_end" in data:
+        qh_end = normalize_time(str(data["quiet_hours_end"]))
+        if qh_end:
+            db_updates["quiet_hours_end"] = qh_end
+
+    if "digest_pre_sleep_minutes" in data:
+        db_updates["digest_pre_sleep_minutes"] = max(1, int(data["digest_pre_sleep_minutes"]))
+
+    if "digest_block_interval_minutes" in data:
+        db_updates["digest_block_interval_minutes"] = max(1, int(data["digest_block_interval_minutes"]))
+
+    if "daytime_publish_interval_minutes" in data:
+        db_updates["daytime_publish_interval_minutes"] = max(1, int(data["daytime_publish_interval_minutes"]))
+
+    if "ai_model_name" in data:
+        model = str(data["ai_model_name"]).strip()
+        if model:
+            db_updates["ai_model_name"] = model
+        else:
+            db_updates["ai_model_name"] = "gemini-3.5-flash-lite, gemini-3.1-flash-lite"
+
+    if "telegram_channel_id" in data:
+        channel = str(data["telegram_channel_id"]).strip()
+        if channel and not channel.startswith("@") and not channel.startswith("-") and not channel.isdigit():
+            channel = f"@{channel}"
+        db_updates["telegram_channel_id"] = channel
+
+    # Sensitive fields - only update if provided and not masked
+    if "ai_api_key" in data and is_unmasked(data["ai_api_key"]):
+        db_updates["ai_api_key"] = str(data["ai_api_key"]).strip()
+
+    if "telegram_bot_token" in data and is_unmasked(data["telegram_bot_token"]):
+        db_updates["telegram_bot_token"] = str(data["telegram_bot_token"]).strip()
+
+    if "twitter_username" in data:
+        db_updates["twitter_username"] = str(data["twitter_username"]).strip()
+
+    if "twitter_email" in data:
+        db_updates["twitter_email"] = str(data["twitter_email"]).strip()
+
+    if "twitter_password" in data and is_unmasked(data["twitter_password"]):
+        db_updates["twitter_password"] = str(data["twitter_password"]).strip()
+
+    if "twitter_proxy_url" in data:
+        db_updates["twitter_proxy_url"] = str(data["twitter_proxy_url"]).strip()
+
+    for string_setting in ["x_search_queries", "x_relevance_prompt", "editor_system_prompt", "editor_prompt_template", "app_timezone"]:
+        if string_setting in data:
+            db_updates[string_setting] = str(data[string_setting]).strip()
+
+    if "scout_interval_minutes" in data:
+        db_updates["scout_interval_minutes"] = max(1, int(data["scout_interval_minutes"]))
+
+    if "max_digest_items" in data:
+        db_updates["max_digest_items"] = max(1, int(data["max_digest_items"]))
+
+    if "queue_sort_strategy" in data:
+        strat = str(data["queue_sort_strategy"]).strip()
+        if strat in ("BY_VIRAL_SCORE", "CHRONOLOGICAL_DESC", "CHRONOLOGICAL_ASC", "RANDOM"):
+            db_updates["queue_sort_strategy"] = strat
+
+    if "backlog_digest_enabled" in data:
+        db_updates["backlog_digest_enabled"] = bool(data["backlog_digest_enabled"])
+
+    if "backlog_max_chunk_size" in data:
+        db_updates["backlog_max_chunk_size"] = max(1, int(data["backlog_max_chunk_size"]))
+
+    for bool_setting in ["show_metric_likes", "show_metric_reposts", "show_metric_views", "show_metric_impact", "show_metric_author", "show_metric_hashtags", "show_metric_source_btn"]:
+        if bool_setting in data:
+            db_updates[bool_setting] = bool(data[bool_setting])
+
+    if db_updates:
+        await init_db()
+        await save_system_settings_dual(db_updates)
+
+    return web.json_response({
+        "status": "saved",
+        "settings": {
+            "min_viral_score": settings.min_viral_score,
+            "super_viral_threshold": getattr(settings, "super_viral_threshold", 100.0),
+            "max_posts_per_run": settings.max_posts_per_run,
+            "scheduler_interval_minutes": settings.scheduler_interval_minutes,
+            "ai_request_delay_seconds": settings.ai_request_delay_seconds,
+            "daily_digest_enabled": settings.daily_digest_enabled,
+            "daily_digest_time": settings.daily_digest_time,
+            "quiet_hours_enabled": settings.quiet_hours_enabled,
+            "quiet_hours_start": settings.quiet_hours_start,
+            "quiet_hours_end": settings.quiet_hours_end,
+            "ai_model_name": settings.ai_model_name,
+            "telegram_channel_id": settings.telegram_channel_id,
+            "twitter_username": settings.twitter_username,
+            "twitter_email": settings.twitter_email,
+            "twitter_proxy_url": settings.twitter_proxy_url,
+            "is_configured": settings.is_configured(),
+            "x_search_queries": getattr(settings, "x_search_queries", ""),
+            "x_relevance_prompt": getattr(settings, "x_relevance_prompt", ""),
+            "scout_interval_minutes": getattr(settings, "scout_interval_minutes", 15),
+            "editor_system_prompt": getattr(settings, "editor_system_prompt", ""),
+            "editor_prompt_template": getattr(settings, "editor_prompt_template", ""),
+            "show_metric_likes": getattr(settings, "show_metric_likes", True),
+            "show_metric_reposts": getattr(settings, "show_metric_reposts", True),
+            "show_metric_views": getattr(settings, "show_metric_views", True),
+            "show_metric_impact": getattr(settings, "show_metric_impact", True),
+            "show_metric_author": getattr(settings, "show_metric_author", True),
+            "show_metric_hashtags": getattr(settings, "show_metric_hashtags", True),
+            "show_metric_source_btn": getattr(settings, "show_metric_source_btn", True),
+            "max_digest_items": getattr(settings, "max_digest_items", 10),
+            "queue_sort_strategy": getattr(settings, "queue_sort_strategy", "BY_VIRAL_SCORE"),
+            "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
+            "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
+            "app_timezone": getattr(settings, "app_timezone", "auto"),
+        }
+    })
+
+
+async def _safe_run_pipeline() -> None:
+    try:
+        await run_pipeline()
+    except Exception as e:
+        print(f"⚠️ Фоновый запуск пайплайна завершился с ошибкой: {e}")
+
+
+async def handle_run_pipeline(request: web.Request) -> web.Response:
+    """Triggers an on-demand background pipeline run."""
+    asyncio.create_task(_safe_run_pipeline())
+    return web.json_response({"status": "pipeline_started", "message": "Сбор и обработка запущены в фоне."})
+
+
+async def handle_run_digest(request: web.Request) -> web.Response:
+    """Triggers an on-demand daily digest run."""
+    manual_slot = f"manual_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}"
+    asyncio.create_task(run_daily_digest(slot_id=manual_slot, is_test=False))
+    return web.json_response({"status": "digest_started", "message": "Генерация дайджеста запущена в фоне."})
+
+
+async def handle_generate_summary(request: web.Request) -> web.Response:
+    """Manually triggers Russian summary generation with Gemini for a specific post."""
+    tweet_id = request.match_info["id"]
+    await init_db()
+    tweet = await get_tweet_by_id(tweet_id)
+    if not tweet:
+        return web.json_response({"error": "Post not found"}, status=404)
+
+    summary_data = await _generate_summary_for_tweet(tweet, force=True)
+    if summary_data:
+        return web.json_response({"status": "success", "summary_data": summary_data, "impact_score": tweet.get("impact_score", 7)})
+    else:
+        return web.json_response({"error": "Failed to generate summary with Gemini (quota or network error). Please try again in a few moments."}, status=500)
+
+
+async def check_twitter_health() -> Dict[str, Any]:
+    """
+    Checks Twitter / X connection and credentials without throwing unhandled exceptions.
+    Returns dict with status ('ok', 'warning', 'error'), message, and details.
+    """
+    cookies_path = Path("cookies.json")
+    cookies_file_exists = cookies_path.is_file()
+    cookies_dict = load_cookies_from_file(cookies_path) if cookies_file_exists else {}
+
+    has_env_token = bool(
+        settings.twitter_auth_token
+        and len(settings.twitter_auth_token.strip()) > 5
+        and "your_" not in settings.twitter_auth_token
+    )
+    has_env_ct0 = bool(
+        settings.twitter_ct0
+        and len(settings.twitter_ct0.strip()) > 5
+        and "your_" not in settings.twitter_ct0
+    )
+
+    auth_token = (settings.twitter_auth_token if has_env_token else None) or cookies_dict.get("auth_token")
+    ct0 = (settings.twitter_ct0 if has_env_ct0 else None) or cookies_dict.get("ct0")
+
+    if not auth_token or not ct0 or "your_" in str(auth_token) or "your_" in str(ct0):
+        return {
+            "name": "X.com (Twitter)",
+            "status": "error",
+            "message": "Сессия не настроена (отсутствуют cookies.json и TWITTER_AUTH_TOKEN/TWITTER_CT0)",
+            "details": {
+                "cookies_file": cookies_file_exists,
+                "env_token": has_env_token,
+                "env_ct0": has_env_ct0,
+            },
+        }
+
+    source = "cookies.json" if cookies_file_exists and not (has_env_token and has_env_ct0) else ".env"
+
+    try:
+        client = await get_twitter_client()
+        screen_name = None
+
+        use_v11 = False
+        if "v11" in getattr(client, "__dict__", {}) or (hasattr(client, "v11") and type(getattr(client, "v11", None)).__name__ == "V11Client"):
+            if hasattr(client.v11, "settings") and callable(client.v11.settings):
+                use_v11 = True
+
+        if use_v11:
+            try:
+                res = await asyncio.wait_for(client.v11.settings(), timeout=6.0)
+                settings_res = res[0] if isinstance(res, (tuple, list)) else res
+                if isinstance(settings_res, dict):
+                    screen_name = settings_res.get("screen_name")
+            except Exception as v11_err:
+                err_str = str(v11_err).lower()
+                if any(x in err_str for x in ("unauthorized", "401", "403", "could not authenticate", "expired", "forbidden", "locked", "suspended")):
+                    return {
+                        "name": "X.com (Twitter)",
+                        "status": "error",
+                        "message": f"Сессия недействительна: cookies истекли ({v11_err})",
+                        "details": {"source": source, "error": str(v11_err)},
+                    }
+                return {
+                    "name": "X.com (Twitter)",
+                    "status": "warning",
+                    "message": f"Cookies загружены ({source}), но X.com не ответил: {v11_err}",
+                    "details": {"source": source, "error": str(v11_err)},
+                }
+        elif hasattr(client, "user") and callable(client.user):
+            # Fallback for mocked clients or clients where user() is defined
+            try:
+                user = await asyncio.wait_for(client.user(), timeout=6.0)
+                if user:
+                    screen_name = getattr(user, "screen_name", None) or getattr(user, "name", None)
+            except Exception as user_err:
+                err_str = str(user_err).lower()
+                if any(x in err_str for x in ("unauthorized", "401", "403", "could not authenticate", "expired", "forbidden", "locked", "suspended")):
+                    return {
+                        "name": "X.com (Twitter)",
+                        "status": "error",
+                        "message": f"Сессия недействительна: cookies истекли ({user_err})",
+                        "details": {"source": source, "error": str(user_err)},
+                    }
+                return {
+                    "name": "X.com (Twitter)",
+                    "status": "warning",
+                    "message": f"Cookies загружены ({source}), но X.com не ответил: {user_err}",
+                    "details": {"source": source, "error": str(user_err)},
+                }
+
+        msg = f"Сессия активна ({source} подключен)"
+        if screen_name:
+            msg = f"Сессия активна (@{screen_name}, {source} подключен)"
+
+        return {
+            "name": "X.com (Twitter)",
+            "status": "ok",
+            "message": msg,
+            "details": {
+                "source": source,
+                "screen_name": screen_name,
+            },
+        }
+    except Exception as e:
+        return {
+            "name": "X.com (Twitter)",
+            "status": "error",
+            "message": f"Ошибка инициализации клиента X: {e}",
+            "details": {"error": str(e)},
+        }
+
+
+async def check_gemini_health() -> Dict[str, Any]:
+    """
+    Checks Google Gemini API readiness, API key, active model, and rate limit status.
+    """
+    key = settings.ai_api_key
+    if not key or "your_gemini_api_key" in key or len(key.strip()) < 8:
+        return {
+            "name": "Google Gemini",
+            "status": "error",
+            "message": "AI_API_KEY не задан или содержит шаблонное значение в .env",
+            "details": {"model": settings.ai_model_name, "key_present": False},
+        }
+
+    ai_stat = get_ai_status()
+    current_status = ai_stat.get("status", "ok")
+    model = settings.ai_model_name or "gemini-3.5-flash-lite"
+    delay = settings.ai_request_delay_seconds
+
+    model_details = {
+        "model": model,
+        "primary_model": settings.primary_model,
+        "fallback_model": settings.fallback_model,
+        "delay_setting": delay,
+        "ai_status": ai_stat,
+    }
+
+    if current_status == "error":
+        return {
+            "name": "Google Gemini",
+            "status": "error",
+            "message": f"Ошибка Gemini API: {ai_stat.get('message', 'Неизвестная ошибка')}",
+            "details": model_details,
+        }
+    elif current_status == "waiting":
+        return {
+            "name": "Google Gemini",
+            "status": "warning",
+            "message": f"Gemini {model}: ожидание лимитов ({ai_stat.get('waiting_seconds', 0)}с)",
+            "details": model_details,
+        }
+    else:
+        if current_status == "pending":
+            set_ai_status("ok", "Готов к работе")
+            ai_stat = get_ai_status()
+            model_details["ai_status"] = ai_stat
+        return {
+            "name": "Google Gemini",
+            "status": "ok",
+            "message": f"Gemini {model} готов",
+            "details": model_details,
+        }
+
+
+async def check_telegram_health() -> Dict[str, Any]:
+    """
+    Checks Telegram Bot token, connectivity via bot.get_me(), and channel permissions via bot.get_chat_administrators().
+    """
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from src.telegram.sender import normalize_channel_id, get_friendly_telegram_error
+
+    bot_token = settings.telegram_bot_token
+    channel_id_raw = settings.telegram_channel_id
+
+    if not bot_token or "your_bot_token" in bot_token or len(bot_token.strip()) < 10:
+        return {
+            "name": "Telegram",
+            "status": "error",
+            "message": "TELEGRAM_BOT_TOKEN не задан в .env или настройках",
+            "details": {"bot_token_present": False},
+        }
+
+    bot = Bot(token=bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    try:
+        me = await asyncio.wait_for(bot.get_me(), timeout=6.0)
+        bot_username = me.username or str(me.id)
+
+        if not channel_id_raw or "your_channel" in channel_id_raw or not str(channel_id_raw).strip():
+            return {
+                "name": "Telegram",
+                "status": "warning",
+                "message": f"Бот @{bot_username} активен, но TELEGRAM_CHANNEL_ID не задан в .env или настройках",
+                "details": {
+                    "bot_username": bot_username,
+                    "bot_id": me.id,
+                    "channel_id_present": False,
+                },
+            }
+
+        try:
+            norm_channel = normalize_channel_id(channel_id_raw)
+            chat = await asyncio.wait_for(bot.get_chat(norm_channel), timeout=6.0)
+            chat_title = chat.title or str(channel_id_raw)
+
+            admins = await asyncio.wait_for(bot.get_chat_administrators(norm_channel), timeout=6.0)
+            bot_admin = next(
+                (admin for admin in admins if getattr(admin, "user", None) and admin.user.id == me.id),
+                None
+            )
+
+            if bot_admin is not None:
+                is_owner = getattr(bot_admin, "status", "") == "creator"
+                can_post = getattr(bot_admin, "can_post_messages", True)
+                if can_post is None:
+                    can_post = True
+
+                if not is_owner and not can_post:
+                    return {
+                        "name": "Telegram",
+                        "status": "warning",
+                        "message": f"Бот @{bot_username} добавлен в канал {chat_title}, но не имеет права на публикацию сообщений",
+                        "details": {
+                            "bot_username": bot_username,
+                            "bot_id": me.id,
+                            "channel": chat_title,
+                            "is_admin": True,
+                            "can_post": False,
+                        },
+                    }
+
+                return {
+                    "name": "Telegram",
+                    "status": "ok",
+                    "message": f"Бот @{bot_username} — администратор канала {chat_title}",
+                    "details": {
+                        "bot_username": bot_username,
+                        "bot_id": me.id,
+                        "channel": chat_title,
+                        "is_admin": True,
+                        "can_post": True,
+                    },
+                }
+            else:
+                return {
+                    "name": "Telegram",
+                    "status": "warning",
+                    "message": f"Бот @{bot_username} найден, но не является администратором канала {chat_title}",
+                    "details": {
+                        "bot_username": bot_username,
+                        "bot_id": me.id,
+                        "channel": chat_title,
+                        "is_admin": False,
+                    },
+                }
+        except Exception as chat_err:
+            friendly_err = get_friendly_telegram_error(chat_err)
+            return {
+                "name": "Telegram",
+                "status": "warning",
+                "message": f"Бот @{bot_username} активен, но канал недоступен: {friendly_err}",
+                "details": {
+                    "bot_username": bot_username,
+                    "bot_id": me.id,
+                    "channel_error": str(chat_err),
+                },
+            }
+    except Exception as e:
+        friendly_err = get_friendly_telegram_error(e)
+        return {
+            "name": "Telegram",
+            "status": "error",
+            "message": friendly_err,
+            "details": {"error": str(e)},
+        }
+    finally:
+        await bot.session.close()
+
+
+def _compute_overall_status(services: Dict[str, Dict[str, Any]]) -> str:
+    statuses = [s.get("status") for s in services.values()]
+    if any(st == "error" for st in statuses):
+        return "error"
+    if any(st == "warning" for st in statuses):
+        return "warning"
+    return "ok"
+
+
+async def handle_get_system_health(request: web.Request) -> web.Response:
+    """Returns real-time health status for X.com, Gemini, and Telegram."""
+    service_req = request.query.get("service")
+    user = request.get("user") or {}
+    is_editor = user.get("role") == "editor"
+
+    if service_req in ("twitter", "x"):
+        res = await check_twitter_health()
+        if is_editor:
+            res = {**res, "details": {}}
+        return web.json_response({
+            "status": res["status"],
+            "services": {"twitter": res},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    elif service_req == "gemini":
+        res = await check_gemini_health()
+        if is_editor:
+            res = {**res, "details": {}}
+        return web.json_response({
+            "status": res["status"],
+            "services": {"gemini": res},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+    elif service_req == "telegram":
+        res = await check_telegram_health()
+        if is_editor:
+            res = {**res, "details": {}}
+        return web.json_response({
+            "status": res["status"],
+            "services": {"telegram": res},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    results = await asyncio.gather(
+        check_twitter_health(),
+        check_gemini_health(),
+        check_telegram_health(),
+        return_exceptions=True,
+    )
+
+    twitter_res = results[0] if not isinstance(results[0], Exception) else {
+        "name": "X.com (Twitter)", "status": "error", "message": f"Сбой проверки: {results[0]}", "details": {}
+    }
+    gemini_res = results[1] if not isinstance(results[1], Exception) else {
+        "name": "Google Gemini", "status": "error", "message": f"Сбой проверки: {results[1]}", "details": {}
+    }
+    telegram_res = results[2] if not isinstance(results[2], Exception) else {
+        "name": "Telegram", "status": "error", "message": f"Сбой проверки: {results[2]}", "details": {}
+    }
+
+    if is_editor:
+        twitter_res["details"] = {}
+        gemini_res["details"] = {}
+        telegram_res["details"] = {}
+
+    services = {
+        "twitter": twitter_res,
+        "gemini": gemini_res,
+        "telegram": telegram_res,
+    }
+    overall = _compute_overall_status(services)
+
+    return web.json_response({
+        "status": overall,
+        "services": services,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+async def handle_get_system_history(request: web.Request) -> web.Response:
+    """Returns recent pipeline runs (default 10)."""
+    await init_db()
+    try:
+        limit = int(request.query.get("limit", 10))
+    except (ValueError, TypeError):
+        limit = 10
+    limit = max(1, min(limit, 100))
+    runs = await get_recent_pipeline_runs(limit=limit)
+    return web.json_response(runs)
+
+
+export_jobs: Dict[str, Dict[str, Any]] = {}
+
+async def _background_export_task(job_id: str, start_date: str, end_date: str):
+    import uuid, zipfile, os, json, shutil
+    try:
+        import aiofiles
+    except ImportError:
+        aiofiles = None
+    file_path = f"data/export_{job_id}.zip"
+    os.makedirs("data", exist_ok=True)
+    jsonl_path = f"data/export_{job_id}.jsonl"
+    
+    try:
+        # Write to JSONL
+        if aiofiles:
+            async with aiofiles.open(jsonl_path, 'w', encoding='utf-8') as f:
+                async for row in export_tweets_data_stream(start_date, end_date):
+                    await f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        else:
+            with open(jsonl_path, 'w', encoding='utf-8') as f:
+                async for row in export_tweets_data_stream(start_date, end_date):
+                    f.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    
+        def create_zip():
+            with zipfile.ZipFile(file_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                zf.write(jsonl_path, arcname=f"export_{start_date[:10]}_to_{end_date[:10]}.jsonl")
+            if os.path.exists(jsonl_path):
+                os.remove(jsonl_path)
+                
+        await asyncio.to_thread(create_zip)
+        export_jobs[job_id]["status"] = "completed"
+        export_jobs[job_id]["file_path"] = file_path
+    except Exception as e:
+        export_jobs[job_id]["status"] = "error"
+        export_jobs[job_id]["error"] = str(e)
+        if os.path.exists(jsonl_path):
+            try: os.remove(jsonl_path)
+            except: pass
+
+async def handle_system_export_start(request: web.Request) -> web.Response:
+    user = request.get("user")
+    if not user or user.get("role") != "admin":
+        return web.json_response({"error": "Admin required"}, status=403)
+        
+    data = await request.json()
+    start_date = data.get("start_date", "1970-01-01T00:00:00")
+    end_date = data.get("end_date", "2100-01-01T00:00:00")
+    import uuid
+    job_id = str(uuid.uuid4())
+    export_jobs[job_id] = {"status": "processing"}
+    asyncio.create_task(_background_export_task(job_id, start_date, end_date))
+    return web.json_response({"status": "processing", "job_id": job_id})
+
+async def handle_system_export_status(request: web.Request) -> web.Response:
+    user = request.get("user")
+    if not user or user.get("role") != "admin":
+        return web.json_response({"error": "Admin required"}, status=403)
+    job_id = request.query.get("job_id")
+    if not job_id or job_id not in export_jobs:
+        return web.json_response({"error": "Not found"}, status=404)
+    return web.json_response(export_jobs[job_id])
+
+async def handle_system_export_download(request: web.Request) -> web.Response:
+    user = request.get("user")
+    if not user or user.get("role") != "admin":
+        return web.json_response({"error": "Admin required"}, status=403)
+    job_id = request.query.get("job_id")
+    if not job_id or job_id not in export_jobs:
+        return web.json_response({"error": "Not found"}, status=404)
+    job = export_jobs[job_id]
+    if job["status"] != "completed":
+        return web.json_response({"error": "Not ready"}, status=400)
+    return web.FileResponse(Path(job["file_path"]), headers={"Content-Disposition": f'attachment; filename="export_{job_id[:8]}.zip"'})
+
+
+async def handle_get_history(request: web.Request) -> web.Response:
+    """Returns historical pipeline runs."""
+    await init_db()
+    limit = int(request.query.get("limit", 50))
+    from src.db import get_recent_pipeline_runs
+    runs = await get_recent_pipeline_runs(limit=limit)
+    return web.json_response(runs)
+
+
+async def handle_system_history_delete(request: web.Request) -> web.Response:
+    """Deletes historical data up to a given date."""
+    user = request.get("user")
+    if not user or user.get("role") != "admin":
+        return web.json_response({"error": "Admin required"}, status=403)
+        
+    data = await request.json()
+    end_date = data.get("end_date")
+    if not end_date:
+        return web.json_response({"error": "end_date is required"}, status=400)
+        
+    deleted_count = await delete_historical_data(end_date)
+    return web.json_response({"status": "success", "deleted": deleted_count})
+
+
+def create_app() -> web.Application:
+    """Creates and configures the web application with authentication middleware."""
+    app = web.Application(middlewares=[auth_middleware])
+
+    # CORS / Static & Routes
+    app.router.add_get("/", handle_index)
+    app.router.add_get("/favicon.ico", handle_favicon)
+
+    # Auth & RBAC
+    app.router.add_get("/api/auth/setup_status", handle_setup_status)
+    app.router.add_post("/api/auth/setup", handle_setup)
+    app.router.add_post("/api/auth/login", handle_login)
+    app.router.add_post("/api/auth/logout", handle_logout)
+    app.router.add_get("/api/auth/me", handle_me)
+
+    # User Management (Admin only)
+    app.router.add_get("/api/users", handle_get_users)
+    app.router.add_post("/api/users", handle_create_user)
+    app.router.add_post("/api/users/{username}/password", handle_update_user_password)
+    app.router.add_delete("/api/users/{username}", handle_delete_user)
+
+    # Server-Side Twitter Login & Database Backup (Admin only)
+    app.router.add_post("/api/twitter/login", handle_twitter_login)
+    app.router.add_get("/api/history", handle_get_history)
+
+    # --- Staging & Manual Digest Endpoints ---
+    async def handle_get_staging_tweets(request: web.Request) -> web.Response:
+        await init_db()
+        strategy = request.query.get("strategy", getattr(settings, "queue_sort_strategy", "BY_VIRAL_SCORE"))
+        limit = int(request.query.get("limit", 50))
+        tweets = await get_staging_tweets(strategy=strategy, limit=limit)
+        return web.json_response(tweets)
+
+    async def handle_staging_digest_preview(request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+        tweet_ids = data.get("tweet_ids", [])
+        if not tweet_ids:
+            return web.json_response({"error": "No tweets selected"}, status=400)
+
+        max_items = getattr(settings, "max_digest_items", 10)
+        if len(tweet_ids) > max_items:
+            return web.json_response({"error": f"Превышен лимит постов для контекста (макс {max_items})"}, status=400)
+
+        await init_db()
+        tweets = []
+        for tid in tweet_ids:
+            t = await get_tweet_by_id(tid)
+            if t:
+                tweets.append(t)
+
+        from src.digest import generate_digest_with_gemini, format_digest_post
+        digest_summary = await generate_digest_with_gemini(tweets)
+        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        formatted = format_digest_post(digest_summary, date_str, header_title=data.get("title", ""))
+        return web.json_response({"status": "success", "formatted_text": formatted, "tweets_count": len(tweets)})
+
+    async def handle_staging_digest_publish(request: web.Request) -> web.Response:
+        try:
+            data = await request.json()
+        except Exception:
+            return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+        tweet_ids = data.get("tweet_ids", [])
+        if not tweet_ids:
+            return web.json_response({"error": "No tweets selected"}, status=400)
+
+        max_items = getattr(settings, "max_digest_items", 10)
+        if len(tweet_ids) > max_items:
+            return web.json_response({"error": f"Превышен лимит постов для контекста (макс {max_items})"}, status=400)
+
+        await init_db()
+        title = data.get("title") or f"Дайджест {datetime.now(timezone.utc).strftime('%Y-%m-%d')}"
+        formatted_text = data.get("formatted_text")
+        if not formatted_text:
+            tweets = []
+            for tid in tweet_ids:
+                t = await get_tweet_by_id(tid)
+                if t:
+                    tweets.append(t)
+            from src.digest import generate_digest_with_gemini, format_digest_post
+            digest_summary = await generate_digest_with_gemini(tweets)
+            date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            formatted_text = format_digest_post(digest_summary, date_str, header_title=title)
+
+        digest_id = await create_digest_draft(title, formatted_text, tweet_ids)
+        scheduled_at = data.get("scheduled_at")
+        if scheduled_at:
+            sched_utc = normalize_to_utc_iso(scheduled_at)
+            import aiosqlite
+            async with aiosqlite.connect(settings.db_path) as db:
+                await db.execute(
+                    "UPDATE digests SET status = 'SCHEDULED', scheduled_at = ? WHERE id = ?",
+                    (sched_utc, digest_id)
+                )
+                await db.commit()
+            return web.json_response({"status": "scheduled", "digest_id": digest_id, "scheduled_at": sched_utc})
+        else:
+            msg_id = None
+            if settings.is_configured() and getattr(settings, "telegram_bot_token", None):
+                try:
+                    msg_id = await send_post_to_channel(formatted_text)
+                except Exception as e:
+                    print(f"⚠️ Ошибка отправки дайджеста в Telegram: {e}")
+            await publish_digest(digest_id, telegram_message_id=msg_id)
+            return web.json_response({"status": "published", "digest_id": digest_id})
+
+    async def handle_create_manual_digest(request: web.Request) -> web.Response:
+        return await handle_staging_digest_publish(request)
+
+    async def handle_get_digests(request: web.Request) -> web.Response:
+        await init_db()
+        limit = int(request.query.get("limit", 50))
+        digests = await get_digests_list(limit=limit)
+        return web.json_response(digests)
+
+    app.router.add_get("/api/staging/tweets", handle_get_staging_tweets)
+    app.router.add_post("/api/staging/digest/preview", handle_staging_digest_preview)
+    app.router.add_post("/api/staging/digest/publish", handle_staging_digest_publish)
+    app.router.add_post("/api/staging/digest/create", handle_create_manual_digest)
+    app.router.add_get("/api/digests", handle_get_digests)
+
+    app.router.add_get("/api/system/backup", handle_system_backup)
+    app.router.add_post("/api/system/export", handle_system_export_start)
+    app.router.add_get("/api/system/export/status", handle_system_export_status)
+    app.router.add_get("/api/system/export/download", handle_system_export_download)
+    app.router.add_delete("/api/system/history", handle_system_history_delete)
+
+    # Posts & Workflow
+    app.router.add_get("/api/posts/queue", handle_get_queue)
+    app.router.add_get("/api/posts/published", handle_get_published)
+    app.router.add_post("/api/posts/{id}/schedule", handle_update_schedule)
+    app.router.add_post("/api/posts/auto_schedule", handle_auto_schedule)
+    app.router.add_post("/api/posts/reorder", handle_reorder_queue)
+    app.router.add_post("/api/posts/{id}/publish_now", handle_publish_now)
+    app.router.add_post("/api/posts/{id}/edit", handle_edit_post)
+    app.router.add_post("/api/posts/{id}/generate_summary", handle_generate_summary)
+    app.router.add_delete("/api/posts/{id}", handle_delete_post)
+
+    # System Status & Settings
+    app.router.add_get("/api/status", handle_get_status)
+    app.router.add_get("/api/settings", handle_get_settings)
+    app.router.add_post("/api/settings", handle_update_settings)
+    app.router.add_post("/api/pipeline/run", handle_run_pipeline)
+    app.router.add_post("/api/digest/run", handle_run_digest)
+    app.router.add_get("/api/system/health", handle_get_system_health)
+    app.router.add_get("/api/system/history", handle_get_system_history)
+
+    if STATIC_DIR.exists():
+        app.router.add_static("/static", path=STATIC_DIR, name="static")
+
+    return app
+
+
+async def start_web_server(host: str = "0.0.0.0", port: int = 8000) -> None:
+    """Starts the web dashboard server."""
+    app = create_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host, port)
+    await site.start()
+    print(f"🌐 Дашборд AI Viral Hunter запущен на http://localhost:{port} (host: {host})")
+
+
+def main() -> None:
+    port = int(os.environ.get("PORT", 8000))
+    host = os.environ.get("HOST", "0.0.0.0")
+    app = create_app()
+    print(f"🚀 Запуск веб-дашборда на http://localhost:{port}")
+    web.run_app(app, host=host, port=port)
+
+
+if __name__ == "__main__":
+    main()

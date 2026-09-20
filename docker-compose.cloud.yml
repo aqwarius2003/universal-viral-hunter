@@ -1,0 +1,32 @@
+services:
+  ai-viral-hunter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-viral-hunter
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DB_PATH: /app/data/tweets.sqlite
+      PYTHONUNBUFFERED: "1"
+      TZ: Asia/Tbilisi
+    mem_limit: 768m
+    memswap_limit: 1g
+    cpus: 1.0
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/auth/setup_status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
