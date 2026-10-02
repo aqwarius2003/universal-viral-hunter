@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AI Viral Hunter — Дашборд публикаций</title>
+  <title>Viral Hunter — Дашборд публикаций</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -60,10 +60,25 @@
       margin: 0 auto;
       padding: 12px 24px;
       display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    .header-top,
+    .header-command-row {
+      display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: 16px;
-      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    .header-top {
+      justify-content: space-between;
+    }
+
+    .header-command-row {
+      justify-content: space-between;
     }
 
     .logo-area {
@@ -98,8 +113,136 @@
     .header-actions {
       display: flex;
       align-items: center;
+      justify-content: flex-start;
       gap: 10px;
+      min-width: 0;
       flex-wrap: wrap;
+    }
+
+    .header-actions #user-header-area {
+      margin-left: auto;
+    }
+
+    .header-statuses {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      min-width: 0;
+      margin-left: auto;
+    }
+
+    .header-clock {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: center;
+      min-width: 190px;
+      flex: 0 0 190px;
+      padding-right: 14px;
+      border-right: 1px solid var(--tg-border);
+    }
+
+    .header-clock-time {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.35rem;
+      line-height: 1.2;
+      font-weight: 600;
+      letter-spacing: 0;
+      color: var(--tg-text);
+    }
+
+    .header-clock-zone {
+      margin-top: 2px;
+      color: var(--tg-text-muted);
+      font-size: 0.72rem;
+    }
+
+    .timezone-control {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 16px;
+      margin-bottom: 20px;
+      background: var(--tg-card);
+      border: 1px solid var(--tg-border);
+      border-radius: var(--radius);
+    }
+
+    .timezone-control select,
+    .timezone-control input {
+      min-height: 38px;
+      border: 1px solid #496176;
+      border-radius: 7px;
+      background: #223244;
+      color: #f5f5f5;
+      padding: 8px 10px;
+      color-scheme: dark;
+    }
+
+    .timezone-control select option {
+      background: #223244;
+      color: #f5f5f5;
+    }
+
+    .timezone-control select:focus,
+    .timezone-control input:focus {
+      outline: 2px solid var(--tg-primary);
+      outline-offset: 1px;
+    }
+
+    @media (max-width: 760px) {
+      .header-clock {
+        min-width: 0;
+        flex-basis: auto;
+        align-items: flex-start;
+        border-right: 0;
+        padding-right: 0;
+      }
+
+      .header-top,
+      .header-command-row {
+        align-items: flex-start;
+        flex-wrap: wrap;
+      }
+
+      .header-statuses {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .header-actions #user-header-area {
+        margin-left: 0;
+      }
+
+      .header-clock-time {
+        font-size: 1.1rem;
+      }
+
+      .timezone-control {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .tab-group + .tab-group {
+        margin-left: 4px;
+        padding-left: 4px;
+      }
+
+      .digest-schedule-row {
+        grid-template-columns: 1fr auto;
+      }
+
+      .digest-schedule-row .digest-schedule-time,
+      .digest-schedule-row .digest-schedule-title,
+      .digest-schedule-row small {
+        grid-column: 1;
+      }
+
+      .digest-schedule-row button {
+        grid-column: 2;
+      }
     }
 
     /* BUTTONS */
@@ -284,6 +427,8 @@
     .tabs-bar {
       background-color: var(--tg-header);
       border-bottom: 1px solid var(--tg-border);
+      position: relative;
+      z-index: 1;
     }
 
     .tabs-container {
@@ -292,6 +437,20 @@
       padding: 0 24px;
       display: flex;
       gap: 8px;
+      overflow-x: auto;
+      scrollbar-width: thin;
+    }
+
+    .tab-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .tab-group + .tab-group {
+      margin-left: 10px;
+      padding-left: 10px;
+      border-left: 1px solid var(--tg-border);
     }
 
     .tab-btn {
@@ -727,6 +886,52 @@
       box-shadow: var(--tg-shadow);
     }
 
+    .settings-layout {
+      width: 100%;
+      max-width: 1180px;
+    }
+
+    .digest-schedule-editor {
+      width: 100%;
+      max-width: none;
+      overflow: visible;
+      box-sizing: border-box;
+    }
+
+    .digest-settings-row {
+      display: block;
+      width: 100%;
+    }
+
+    .digest-settings-row > .form-group {
+      width: 100%;
+      max-width: none;
+    }
+
+    .digest-schedule-row {
+      display: grid;
+      grid-template-columns: minmax(74px, auto) minmax(180px, 1fr) auto auto auto;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      min-width: 0;
+    }
+
+    .digest-schedule-title {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+
+    .digest-rule-field {
+      min-width: 0;
+    }
+
+    .digest-rule-field .form-hint {
+      min-height: 2.4em;
+      line-height: 1.25;
+    }
+
     .form-group {
       margin-bottom: 20px;
     }
@@ -766,6 +971,17 @@
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
+    }
+
+    .form-row.digest-settings-row {
+      display: block;
+      grid-template-columns: none;
+      width: 100%;
+    }
+
+    .form-row.digest-settings-row > .form-group {
+      width: 100%;
+      max-width: none;
     }
 
     /* MODAL DIALOG */
@@ -1092,6 +1308,8 @@
 
     .table-responsive {
       overflow-x: auto;
+      overflow-y: auto;
+      max-height: 400px;
       width: 100%;
     }
 
@@ -1103,13 +1321,16 @@
     }
 
     .runs-table th {
-      background: rgba(0, 0, 0, 0.25);
+      background: rgba(0, 0, 0, 0.4);
       color: var(--tg-text-muted);
       font-weight: 600;
       padding: 12px 16px;
       border-bottom: 1px solid var(--tg-border);
       font-size: 0.8rem;
       letter-spacing: 0.3px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
 
     .runs-table td {
@@ -1145,6 +1366,130 @@
     .status-tag-error {
       background: rgba(231, 76, 60, 0.15);
       color: #e74c3c;
+    }
+
+    /* HISTORY CONTROLS: DATE RANGE PICKER & TAB SWITCHER */
+    .history-controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .history-tab-switcher {
+      display: flex;
+      background: var(--tg-button-bg);
+      border: 1px solid var(--tg-border);
+      border-radius: 8px;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .history-tab-btn {
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--tg-text-muted);
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .history-tab-btn.active {
+      background: var(--tg-primary);
+      color: #fff;
+    }
+
+    .history-tab-btn:hover:not(.active) {
+      background: var(--tg-button-hover);
+      color: var(--tg-text);
+    }
+
+    .date-range-picker {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      flex: 1;
+    }
+
+    .date-range-picker input[type="date"] {
+      background: var(--tg-bg);
+      border: 1px solid var(--tg-border);
+      color: var(--tg-text);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-family: inherit;
+    }
+
+    .date-range-picker input[type="date"]:focus {
+      outline: none;
+      border-color: var(--tg-primary);
+    }
+
+    .date-preset-btn {
+      padding: 5px 10px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      background: var(--tg-button-bg);
+      border: 1px solid var(--tg-border);
+      color: var(--tg-text-muted);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .date-preset-btn:hover, .date-preset-btn.active {
+      background: var(--tg-button-hover);
+      border-color: var(--tg-primary);
+      color: var(--tg-primary);
+    }
+
+    .btn-export-csv {
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      background: rgba(46, 204, 113, 0.12);
+      border: 1px solid rgba(46, 204, 113, 0.3);
+      color: #2ecc71;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .btn-export-csv:hover {
+      background: rgba(46, 204, 113, 0.22);
+      border-color: #2ecc71;
+    }
+
+    /* REJECTED TWEETS TABLE */
+    .rejected-score-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 7px;
+      border-radius: 5px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(231, 76, 60, 0.1);
+      color: #e74c3c;
+    }
+
+    .rejection-reason-cell {
+      font-size: 0.78rem;
+      color: var(--tg-accent-amber);
+      max-width: 220px;
     }
 
     /* USER PROFILE BADGE */
@@ -1270,47 +1615,42 @@
   <!-- HEADER -->
   <header>
     <div class="header-container">
-      <div class="logo-area">
-        <div class="logo-icon">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
-          </svg>
+      <div class="header-top">
+        <div class="logo-area">
+          <div class="logo-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+            </svg>
+          </div>
+          <div class="logo-text">
+            <h1>Viral Hunter</h1>
+            <p>Центр управления публикациями Telegram</p>
+          </div>
         </div>
-        <div class="logo-text">
-          <h1>AI Viral Hunter</h1>
-          <p>Центр управления публикациями Telegram</p>
+
+        <div class="header-statuses">
+          <!-- Live AI Status Pill (Pending initially) -->
+          <div id="ai-status-pill" class="status-pill status-pill-pending" onclick="showStatusDetails()" title="Нажмите для информации о статусе">
+            <span class="status-dot"></span>
+            <span id="ai-status-text">ИИ: Проверка...</span>
+          </div>
+          <div id="pipeline-status-pill" class="status-pill status-pill-pending" title="Состояние последнего запуска pipeline">
+            <span class="status-dot"></span>
+            <span id="pipeline-status-text">Pipeline: Ожидание</span>
+          </div>
+          <div class="header-clock" aria-live="polite">
+            <span id="current-server-time" class="header-clock-time">--:--:--</span>
+            <span id="current-server-zone" class="header-clock-zone">Часовой пояс не задан</span>
+          </div>
         </div>
       </div>
 
-      <div class="header-actions">
-        <div style="display:flex; align-items:center; gap:8px; font-size:12px; margin-right:12px;">
-           <span id="current-server-time" style="font-family: monospace;">--:--:--</span>
-           <select id="header-timezone" onchange="updateHeaderTimezone()" style="background:var(--tg-secondary-bg); color:var(--tg-text); border:1px solid var(--tg-border); border-radius:4px; padding:2px 4px;">
-              <option value="UTC">UTC</option>
-              <option value="Europe/Moscow">Europe/Moscow</option>
-              <option value="Asia/Tbilisi">Asia/Tbilisi</option>
-              <option value="Asia/Almaty">Asia/Almaty</option>
-           </select>
-        </div>
-        <!-- Live AI Status Pill (Pending initially) -->
-        <div id="ai-status-pill" class="status-pill status-pill-pending" onclick="showStatusDetails()" title="Нажмите для информации о статусе">
-          <span class="status-dot"></span>
-          <span id="ai-status-text">ИИ: Проверка...</span>
-        </div>
-
+      <div class="header-command-row">
+        <div class="header-actions">
         <button class="btn btn-primary" onclick="triggerPipeline()">
           <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
           Собрать твиты (Scout)
         </button>
-        <button class="btn btn-secondary" onclick="triggerDigest()">
-          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"></path><path d="M18 14h-8"></path><path d="M15 18h-5"></path><path d="M10 6h8v4h-8V6Z"></path></svg>
-          Выпустить дайджест
-        </button>
-        <button class="btn" onclick="loadAllData()">
-          <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
-          Обновить
-        </button>
-
         <!-- User Profile Badge & Logout -->
         <div id="user-header-area" class="user-profile-badge" style="display: none;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
@@ -1322,12 +1662,13 @@
           </button>
         </div>
       </div>
+      </div>
     </div>
-  </header>
 
-  <!-- TABS BAR -->
-  <nav class="tabs-bar">
+    <!-- TABS BAR: stays visible with the sticky header while content scrolls -->
+    <nav class="tabs-bar">
     <div class="tabs-container">
+      <div class="tab-group" aria-label="Управление публикациями">
       <button class="tab-btn active" id="tab-btn-queue" onclick="switchTab('queue')">
         <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
         План публикаций (Очередь)
@@ -1337,6 +1678,8 @@
         <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
         Дайджесты (Staging)
       </button>
+      </div>
+      <div class="tab-group" aria-label="Архив и аналитика">
       <button class="tab-btn" id="tab-btn-published" onclick="switchTab('published')">
         <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
         Опубликованные
@@ -1347,12 +1690,16 @@
         Мониторинг
         <span class="status-dot" id="monitoring-dot" style="background:#7f8c8d; width:8px; height:8px; display:inline-block; border-radius:50%; margin-left:4px; box-shadow:0 0 6px rgba(127,140,141,0.5);" title="Состояние системы"></span>
       </button>
+      </div>
+      <div class="tab-group" aria-label="Конфигурация">
       <button class="tab-btn" id="tab-btn-settings" onclick="switchTab('settings')">
         <svg class="tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Настройки
       </button>
+      </div>
     </div>
-  </nav>
+    </nav>
+  </header>
 
   <!-- MAIN VIEW -->
   <main>
@@ -1601,35 +1948,103 @@
       </div>
 
       <!-- History of Pipeline Runs -->
-      <div class="section-header" style="margin-top: 36px; margin-bottom: 16px;">
+      <div class="section-header" style="margin-top: 36px; margin-bottom: 12px;">
         <div>
-          <h3 class="section-title" style="font-size: 1.15rem;">История последних сборов твитов</h3>
-          <p class="section-subtitle">Журнал 10 последних запусков пайплайна (длительность, собрано твитов, виральных и статус).</p>
+          <h3 class="section-title" style="font-size: 1.15rem;">История сборов твитов</h3>
+          <p class="section-subtitle">Журнал запусков пайплайна и список твитов, не прошедших фильтр виральности.</p>
         </div>
       </div>
 
-      <div class="history-container">
-        <div class="table-responsive">
-          <table class="runs-table">
-            <thead>
-              <tr>
-                <th style="width: 50px;">#</th>
-                <th>Время запуска</th>
-                <th>Длительность</th>
-                <th>Собрано твитов</th>
-                <th>Виральных</th>
-                <th>Статус</th>
-                <th>Результат / Ошибка</th>
-              </tr>
-            </thead>
-            <tbody id="runs-table-body">
-              <tr>
-                <td colspan="7" style="text-align: center; color: var(--tg-text-muted); padding: 30px;">
-                  Загрузка истории запусков...
-                </td>
-              </tr>
-            </tbody>
-          </table>
+      <!-- Строка управления: переключатель вкладок + пикер дат + экспорт -->
+      <div class="history-controls-bar">
+        <!-- Переключатель режима вкладок -->
+        <div class="history-tab-switcher" role="tablist">
+          <button class="history-tab-btn active" id="htab-btn-runs" role="tab"
+                  onclick="switchHistoryTab('runs')" aria-selected="true">
+            ✅ Успешные сборы
+          </button>
+          <button class="history-tab-btn" id="htab-btn-filtered" role="tab"
+                  onclick="switchHistoryTab('filtered')" aria-selected="false">
+            🗑️ Отфильтрованные
+          </button>
+        </div>
+
+        <!-- Пресеты диапазона дат -->
+        <div class="date-range-picker" id="history-date-picker">
+          <button class="date-preset-btn" onclick="applyHistoryDatePreset('today')">Сегодня</button>
+          <button class="date-preset-btn" onclick="applyHistoryDatePreset('7d')">7 дней</button>
+          <button class="date-preset-btn" onclick="applyHistoryDatePreset('month')">Месяц</button>
+          <span style="color: var(--tg-text-dim); font-size: 0.78rem;">с</span>
+          <input type="date" id="history-date-from" onchange="applyHistoryDateFilter()" title="Начало периода">
+          <span style="color: var(--tg-text-dim); font-size: 0.78rem;">по</span>
+          <input type="date" id="history-date-to" onchange="applyHistoryDateFilter()" title="Конец периода">
+          <button class="date-preset-btn" onclick="clearHistoryDateFilter()" title="Сбросить фильтр" style="color: var(--tg-accent-red);">✕</button>
+        </div>
+
+        <!-- Экспорт в CSV -->
+        <button class="btn-export-csv" onclick="exportHistoryToCsv()" title="Скачать текущие данные таблицы в CSV">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          CSV
+        </button>
+      </div>
+
+      <!-- Вкладка 1: история запусков пайплайна -->
+      <div id="htab-panel-runs" role="tabpanel">
+        <div class="history-container">
+          <div class="table-responsive">
+            <table class="runs-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">#</th>
+                  <th>Время запуска</th>
+                  <th>Длительность</th>
+                  <th>Собрано</th>
+                  <th>Виральных</th>
+                  <th>Статус</th>
+                  <th>Результат / Ошибка</th>
+                </tr>
+              </thead>
+              <tbody id="runs-table-body">
+                <tr>
+                  <td colspan="7" style="text-align: center; color: var(--tg-text-muted); padding: 30px;">
+                    Загрузка истории запусков...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Вкладка 2: отфильтрованные (не виральные) твиты -->
+      <div id="htab-panel-filtered" role="tabpanel" style="display: none;">
+        <div class="history-container">
+          <div class="table-responsive">
+            <table class="runs-table">
+              <thead>
+                <tr>
+                  <th style="width: 50px;">#</th>
+                  <th>Время сбора</th>
+                  <th>Автор</th>
+                  <th>Текст твита</th>
+                  <th>Viral Score</th>
+                  <th>Причина отклонения</th>
+                  <th>Ссылка</th>
+                </tr>
+              </thead>
+              <tbody id="filtered-table-body">
+                <tr>
+                  <td colspan="7" style="text-align: center; color: var(--tg-text-muted); padding: 30px;">
+                    Загрузка отфильтрованных твитов...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
@@ -1643,7 +2058,25 @@
         </div>
       </div>
 
-      <div style="display: flex; flex-direction: column; gap: 24px; max-width: 820px;">
+      <div class="settings-layout" style="display: flex; flex-direction: column; gap: 24px;">
+        <div class="timezone-control">
+          <div style="flex:1;">
+            <label class="form-label" for="setting-timezone">Часовой пояс публикаций</label>
+            <p class="form-hint">Выберите IANA-зону или укажите смещение UTC вручную, например +4, -3 или +04:30.</p>
+          </div>
+          <select id="setting-timezone" aria-label="Часовой пояс публикаций">
+            <option value="">Не задан</option>
+            <option value="UTC">UTC</option>
+            <option value="Europe/Moscow">Europe/Moscow</option>
+            <option value="Asia/Tbilisi">Asia/Tbilisi</option>
+            <option value="Asia/Almaty">Asia/Almaty</option>
+            <option value="Asia/Yekaterinburg">Asia/Yekaterinburg</option>
+            <option value="Asia/Krasnoyarsk">Asia/Krasnoyarsk</option>
+            <option value="Asia/Vladivostok">Asia/Vladivostok</option>
+          </select>
+          <input type="text" id="setting-timezone-offset" inputmode="text" placeholder="UTC +4" aria-label="Ручное UTC смещение">
+        </div>
+
         <!-- Card 1: Main Settings & API Keys -->
         <div class="settings-card" style="max-width: 100%;">
           <h3 style="margin-bottom: 16px; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">
@@ -1676,15 +2109,57 @@
               </div>
             </div>
 
-            <div class="form-row">
+            <div class="form-row digest-settings-row">
               <div class="form-group">
-                <label class="form-label" for="setting-digest-time">Расписание дайджестов (через запятую)</label>
-                <input type="text" class="form-control" id="setting-digest-time" name="daily_digest_time" placeholder="07:00, 14:00, 21:00" required>
-                <p class="form-hint">Время публикации (например: 07:00, 14:00, 21:00 или 21:00)</p>
-                <div class="model-quick-select" style="margin-top:6px;">
-                  <button type="button" class="model-btn" onclick="setDigestPreset('07:00, 14:00, 21:00')">3 раза: 07:00, 14:00, 21:00</button>
-                  <button type="button" class="model-btn" onclick="setDigestPreset('10:00, 20:00')">2 раза: 10:00, 20:00</button>
-                  <button type="button" class="model-btn" onclick="setDigestPreset('21:00')">Вечер: 21:00</button>
+                <label class="form-label">Регулярные дайджесты</label>
+                <p class="form-hint">Создавайте отдельные правила ниже: время, заголовок, лимиты сообщений, сортировка и интервал отправки.</p>
+                <div id="digest-schedule-editor" class="digest-schedule-editor" style="margin-top:14px; padding:12px; border:1px solid var(--tg-border); border-radius:8px; background:rgba(0,0,0,0.12);">
+                  <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:10px;">
+                    <strong>Регулярные дайджесты</strong>
+                    <button type="button" class="btn btn-sm" onclick="resetDigestScheduleForm()">Новое правило</button>
+                  </div>
+                  <div id="digest-schedules-list" class="digest-schedules-list" style="display:flex; flex-direction:column; gap:6px; margin-bottom:10px;"></div>
+                  <input type="hidden" id="digest-schedule-id">
+                  <div style="display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:8px;">
+                    <div class="digest-rule-field">
+                      <label class="form-label" for="digest-rule-time">Время запуска</label>
+                      <input type="time" class="form-control" id="digest-rule-time" value="07:00" title="Ежедневное время запуска правила" aria-label="Время дайджеста">
+                      <p class="form-hint">Когда запускать правило каждый день.</p>
+                    </div>
+                    <div class="digest-rule-field">
+                      <label class="form-label" for="digest-rule-items">Новостей в сообщении</label>
+                      <input type="number" min="1" max="50" class="form-control" id="digest-rule-items" value="5" placeholder="Постов в сообщении" title="Максимум новостей в одном сообщении" aria-label="Постов в сообщении">
+                      <p class="form-hint">Максимум новостей в одном сообщении.</p>
+                    </div>
+                    <div class="digest-rule-field">
+                      <label class="form-label" for="digest-rule-posts">Сообщений за запуск</label>
+                      <input type="number" min="1" max="20" class="form-control" id="digest-rule-posts" value="1" placeholder="Сообщений за запуск" title="Максимум сообщений за один запуск" aria-label="Сообщений за запуск">
+                      <p class="form-hint">Сколько сообщений отправить за запуск.</p>
+                    </div>
+                  </div>
+                  <div class="digest-rule-field" style="margin-top:8px;">
+                    <label class="form-label" for="digest-rule-title">Заголовок дайджеста</label>
+                    <input type="text" class="form-control" id="digest-rule-title" value="Дайджест новостей" placeholder="Заголовок дайджеста" title="Заголовок, который будет показан в сообщении">
+                    <p class="form-hint">Этот заголовок будет использоваться в каждом сообщении правила.</p>
+                  </div>
+                  <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                    <div class="digest-rule-field">
+                      <label class="form-label" for="digest-rule-sort">Сортировка</label>
+                      <select class="form-control" id="digest-rule-sort" title="Порядок выбора новостей из очереди" aria-label="Сортировка дайджеста">
+                        <option value="BY_VIRAL_SCORE">Популярность: по убыванию</option>
+                        <option value="CHRONOLOGICAL_DESC">Новые сначала</option>
+                        <option value="CHRONOLOGICAL_ASC">Старые сначала</option>
+                        <option value="RANDOM">Случайный порядок</option>
+                      </select>
+                      <p class="form-hint">Порядок выбора новостей из очереди.</p>
+                    </div>
+                    <div class="digest-rule-field">
+                      <label class="form-label" for="digest-rule-interval">Пауза между сообщениями</label>
+                      <input type="number" min="0" max="1440" class="form-control" id="digest-rule-interval" value="5" placeholder="Интервал, мин." title="Пауза между сообщениями одного дайджеста" aria-label="Интервал между сообщениями">
+                      <p class="form-hint">Интервал между сообщениями в минутах.</p>
+                    </div>
+                  </div>
+                  <button type="button" class="btn btn-primary btn-sm" onclick="saveDigestScheduleRule()" style="margin-top:8px;">Сохранить правило</button>
                 </div>
               </div>
               <div class="form-group">
@@ -1706,11 +2181,11 @@
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                   <div>
                     <label class="form-label" for="setting-quiet-start">Начало сна</label>
-                    <input type="text" class="form-control" id="setting-quiet-start" name="quiet_hours_start" placeholder="22:00" value="22:00">
+                    <input type="text" class="form-control" id="setting-quiet-start" name="quiet_hours_start" placeholder="22:00">
                   </div>
                   <div>
                     <label class="form-label" for="setting-quiet-end">Окончание сна</label>
-                    <input type="text" class="form-control" id="setting-quiet-end" name="quiet_hours_end" placeholder="07:00" value="07:00">
+                    <input type="text" class="form-control" id="setting-quiet-end" name="quiet_hours_end" placeholder="07:00">
                   </div>
                 </div>
                 <p class="form-hint">Диапазон тихих часов (по умолчанию: 22:00 — 07:00)</p>
@@ -1719,7 +2194,7 @@
 
             <!-- Queue & Digest Parameters -->
             <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
-              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Очередь публикаций и лимиты дайджестов</h4>
+              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Очередь публикаций и Scout</h4>
               <div class="form-row">
                 <div class="form-group">
                   <label class="form-label" for="setting-queue-sort-strategy">Стратегия сортировки очереди</label>
@@ -1731,29 +2206,25 @@
                   </select>
                   <p class="form-hint">Порядок выбора постов при публикации</p>
                 </div>
-                <div class="form-group">
-                  <label class="form-label" for="setting-max-digest-items">Максимум постов в дайджесте</label>
-                  <input type="number" min="1" max="25" class="form-control" id="setting-max-digest-items" name="max_digest_items" value="10">
-                  <p class="form-hint">Лимит постов для защиты контекстного окна Gemini (по умолчанию: 10)</p>
-                </div>
               </div>
               <div class="form-row">
                 <div class="form-group">
                   <label class="form-label" for="setting-scout-interval">Интервал Scout (минуты)</label>
-                  <input type="number" min="1" class="form-control" id="setting-scout-interval" name="scout_interval_minutes" value="15">
+                  <input type="number" min="1" class="form-control" id="setting-scout-interval" name="scout_interval_minutes">
                   <p class="form-hint">Периодичность фонового сбора твитов</p>
                 </div>
-                <div class="form-group">
-                  <label class="form-label" for="setting-backlog-chunk-size">Размер порции Backlog-дайджеста</label>
-                  <input type="number" min="1" max="15" class="form-control" id="setting-backlog-chunk-size" name="backlog_max_chunk_size" value="6">
-                  <p class="form-hint">Максимум постов в одной части утреннего дайджеста</p>
-                </div>
               </div>
-              <div class="form-group" style="margin-top: 8px;">
-                <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-                  <input type="checkbox" id="setting-backlog-enabled" name="backlog_digest_enabled" style="width:18px; height:18px;">
-                  <span>Включить утренний Backlog-дайджест ("Пока вы спали")</span>
-                </label>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="setting-metric-refresh-limit">Постов для обновления метрик</label>
+                  <input type="number" min="1" max="500" class="form-control" id="setting-metric-refresh-limit" name="metric_refresh_limit">
+                  <p class="form-hint">Сколько наиболее приоритетных постов проверять в X.com при каждом запуске Scout. Больше значение даёт более полную актуализацию, но увеличивает число запросов.</p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="setting-metric-refresh-hours">Период обновления метрик (часы)</label>
+                  <input type="number" min="1" max="720" class="form-control" id="setting-metric-refresh-hours" name="metric_refresh_hours">
+                  <p class="form-hint">Какой возраст постов учитывать при проверке метрик. Например, 48 означает последние двое суток.</p>
+                </div>
               </div>
             </div>
 
@@ -1881,6 +2352,44 @@
               </button>
             </div>
           </form>
+
+          <div style="margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--border-color, #2a2e39);">
+            <h4 style="margin-bottom: 6px; font-size: 1rem; display: flex; align-items: center; gap: 8px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              Прямой ввод Cookies (Надёжный обход блокировок и капчи X)
+            </h4>
+            <p class="form-hint" style="margin-bottom: 14px;">
+              Если автоматический вход в браузере блокируется защитой от ботов X.com, вставьте куки вручную из браузера (F12 ➔ Application ➔ Cookies ➔ https://x.com) или загрузите экспортированный <code>cookies.json</code>.
+            </p>
+
+            <form id="twitter-cookies-form" onsubmit="handleTwitterManualCookiesSave(event)">
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="tw-cookie-auth-token">Cookie: auth_token</label>
+                  <input type="password" class="form-control" id="tw-cookie-auth-token" placeholder="например, 6a1b2c3d4e5f..." autocomplete="off">
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="tw-cookie-ct0">Cookie: ct0 (CSRF token)</label>
+                  <input type="password" class="form-control" id="tw-cookie-ct0" placeholder="например, 9f8e7d6c5b4a..." autocomplete="off">
+                </div>
+              </div>
+              <div style="display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap;">
+                <button type="submit" class="btn btn-primary" id="btn-tw-save-cookies">
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+                  Сохранить Cookies
+                </button>
+                <label class="btn btn-secondary" style="cursor: pointer; margin-bottom: 0;">
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                  Загрузить cookies.json
+                  <input type="file" id="tw-cookie-file" accept=".json" style="display: none;" onchange="handleTwitterCookieFileUpload(event)">
+                </label>
+                <button type="button" class="btn btn-secondary" onclick="viewDebugScreenshot()">
+                  <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  Скриншот ошибки браузера
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
 
         <!-- Card 4: Data Management (Экспорт и очистка) -->
@@ -2243,6 +2752,9 @@
     let publishedData = [];
     let currentEditingPost = null;
     let statusPollInterval = null;
+    let pipelinePollInterval = null;
+    let dataRefreshInterval = null;
+    let pipelineWasStarted = false;
     let currentUser = null;
     let currentWizardStep = 1;
     let twPendingAuth = null;
@@ -2290,6 +2802,10 @@
       if (!statusPollInterval) {
         statusPollInterval = setInterval(pollApiStatus, 5000);
       }
+      if (!dataRefreshInterval) {
+        dataRefreshInterval = setInterval(() => loadAllData(), 20000);
+      }
+      resumePipelinePolling();
     }
 
     function updateUserUI() {
@@ -2335,8 +2851,40 @@
         if (!res.ok) return;
         const data = await res.json();
         updateStatusUI(data);
+        await refreshPipelineStatusBadge();
       } catch (err) {
         console.warn("Status poll error:", err);
+      }
+    }
+
+    async function refreshPipelineStatusBadge() {
+      try {
+        const res = await fetch("/api/pipeline/status", { cache: "no-store" });
+        if (res.ok) updatePipelineStatusUI(await res.json());
+      } catch (err) {
+        console.warn("Pipeline status poll error:", err);
+      }
+    }
+
+    function updatePipelineStatusUI(data) {
+      const pill = document.getElementById("pipeline-status-pill");
+      const text = document.getElementById("pipeline-status-text");
+      if (!pill || !text) return;
+
+      pill.className = "status-pill";
+      if (!data || data.state === "idle") {
+        pill.classList.add("status-pill-pending");
+        text.textContent = "Pipeline: Ожидание";
+      } else if (data.state === "running") {
+        pill.classList.add("status-pill-busy");
+        text.textContent = "Pipeline: Выполняется...";
+      } else if (data.state === "success") {
+        pill.classList.add("status-pill-ok");
+        text.textContent = `Pipeline: Завершён (${data.viral_found || 0} прошли фильтр)`;
+      } else {
+        pill.classList.add("status-pill-error");
+        text.textContent = "Pipeline: Ошибка";
+        if (data.error_message) pill.title = `Ошибка pipeline: ${data.error_message}`;
       }
     }
 
@@ -2462,8 +3010,169 @@
 
     /* MONITORING & HEALTH DATA */
     let systemHealthData = null;
-    let systemHistoryData = [];
+    let systemHistoryData = [];        // кэш данных истории запусков (для фильтрации/экспорта)
+    let systemFilteredData = [];       // кэш отфильтрованных твитов
+    let currentHistoryTab = 'runs';    // активная внутренняя вкладка: 'runs' | 'filtered'
+    let historyDateFrom = null;        // ISO-строка начала диапазона или null
+    let historyDateTo = null;          // ISO-строка конца диапазона или null
 
+    // ─── Переключение вкладок истории ─────────────────────────────────────────
+    function switchHistoryTab(tab) {
+      currentHistoryTab = tab;
+      const btnRuns     = document.getElementById('htab-btn-runs');
+      const btnFiltered = document.getElementById('htab-btn-filtered');
+      const panelRuns   = document.getElementById('htab-panel-runs');
+      const panelFilt   = document.getElementById('htab-panel-filtered');
+      if (btnRuns)     btnRuns.classList.toggle('active', tab === 'runs');
+      if (btnFiltered) btnFiltered.classList.toggle('active', tab === 'filtered');
+      if (panelRuns)   panelRuns.style.display   = tab === 'runs'     ? '' : 'none';
+      if (panelFilt)   panelFilt.style.display    = tab === 'filtered' ? '' : 'none';
+      // Загрузить данные вкладки, если ещё не загружены
+      if (tab === 'filtered' && systemFilteredData.length === 0) {
+        loadFilteredTweets();
+      }
+    }
+
+    // ─── Пресеты диапазона дат ────────────────────────────────────────────────
+    function applyHistoryDatePreset(preset) {
+      const fromInput = document.getElementById('history-date-from');
+      const toInput   = document.getElementById('history-date-to');
+      if (!fromInput || !toInput) return;
+      const now = new Date();
+      const toDateStr = now.toISOString().slice(0, 10);
+      let fromDateStr;
+      if (preset === 'today') {
+        fromDateStr = toDateStr;
+      } else if (preset === '7d') {
+        const from7 = new Date(now);
+        from7.setDate(from7.getDate() - 6);
+        fromDateStr = from7.toISOString().slice(0, 10);
+      } else if (preset === 'month') {
+        const fromM = new Date(now);
+        fromM.setDate(fromM.getDate() - 29);
+        fromDateStr = fromM.toISOString().slice(0, 10);
+      } else {
+        fromDateStr = toDateStr;
+      }
+      fromInput.value = fromDateStr;
+      toInput.value   = toDateStr;
+      // Подсветить активный пресет
+      document.querySelectorAll('.date-preset-btn').forEach(b => b.classList.remove('active'));
+      applyHistoryDateFilter();
+    }
+
+    function applyHistoryDateFilter() {
+      const fromInput = document.getElementById('history-date-from');
+      const toInput   = document.getElementById('history-date-to');
+      historyDateFrom = (fromInput && fromInput.value) ? fromInput.value + 'T00:00:00' : null;
+      historyDateTo   = (toInput   && toInput.value)   ? toInput.value   + 'T23:59:59' : null;
+      // Перерисовать текущую активную вкладку с новыми фильтрами
+      if (currentHistoryTab === 'runs') {
+        renderHistoryUI(getFilteredRunsData());
+      } else {
+        // Загружать отфильтрованные твиты с сервера (дата — серверный параметр)
+        loadFilteredTweets();
+      }
+    }
+
+    function clearHistoryDateFilter() {
+      const fromInput = document.getElementById('history-date-from');
+      const toInput   = document.getElementById('history-date-to');
+      if (fromInput) fromInput.value = '';
+      if (toInput)   toInput.value   = '';
+      historyDateFrom = null;
+      historyDateTo   = null;
+      document.querySelectorAll('.date-preset-btn').forEach(b => b.classList.remove('active'));
+      if (currentHistoryTab === 'runs') {
+        renderHistoryUI(systemHistoryData);
+      } else {
+        loadFilteredTweets();
+      }
+    }
+
+    // Клиентская фильтрация истории запусков по датам (started_at)
+    function getFilteredRunsData() {
+      if (!historyDateFrom && !historyDateTo) return systemHistoryData;
+      return systemHistoryData.filter(run => {
+        const dt = run.started_at;
+        if (!dt) return true;
+        if (historyDateFrom && dt < historyDateFrom) return false;
+        if (historyDateTo   && dt > historyDateTo)   return false;
+        return true;
+      });
+    }
+
+    // ─── Загрузка отфильтрованных твитов с сервера ────────────────────────────
+    async function loadFilteredTweets() {
+      const tbody = document.getElementById('filtered-table-body');
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--tg-text-muted); padding:24px;">Загрузка...</td></tr>`;
+      }
+      try {
+        let url = '/api/system/filtered_tweets?limit=100';
+        if (historyDateFrom) url += `&start_date=${encodeURIComponent(historyDateFrom)}`;
+        if (historyDateTo)   url += `&end_date=${encodeURIComponent(historyDateTo)}`;
+        const res = await fetch(url);
+        if (res.ok) {
+          systemFilteredData = await res.json();
+          renderFilteredUI(systemFilteredData);
+        }
+      } catch (err) {
+        if (tbody) {
+          tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#e74c3c; padding:20px;">Ошибка загрузки: ${escapeHtml(err.message)}</td></tr>`;
+        }
+      }
+    }
+
+    // ─── Экспорт в CSV ─────────────────────────────────────────────────────────
+    function exportHistoryToCsv() {
+      let rows, filename, headers;
+      if (currentHistoryTab === 'runs') {
+        const data = getFilteredRunsData();
+        if (!data || data.length === 0) {
+          showToast('Нет данных для экспорта', 'info');
+          return;
+        }
+        headers = ['ID', 'Время запуска', 'Завершён', 'Длительность (с)', 'Собрано', 'Виральных', 'Статус', 'Ошибка'];
+        rows = data.map(r => [
+          r.id, r.started_at, r.finished_at, r.duration_sec,
+          r.tweets_found, r.viral_found, r.status, r.error_message || ''
+        ]);
+        filename = `pipeline_runs_${new Date().toISOString().slice(0,10)}.csv`;
+      } else {
+        const data = systemFilteredData;
+        if (!data || data.length === 0) {
+          showToast('Нет отфильтрованных твитов для экспорта', 'info');
+          return;
+        }
+        headers = ['ID', 'Автор', 'Текст', 'Ссылка', 'Viral Score', 'Статус', 'Причина отклонения', 'Время сбора'];
+        rows = data.map(r => [
+          r.tweet_id, r.author_handle || '', (r.text_raw || '').replace(/"/g,'""').slice(0,200),
+          r.tweet_url || '', r.viral_score || 0, r.status || '',
+          (r.rejection_reason || '').replace(/"/g,'""'), r.inserted_at || ''
+        ]);
+        filename = `filtered_tweets_${new Date().toISOString().slice(0,10)}.csv`;
+      }
+
+      // Собираем CSV строку
+      const BOM = '\uFEFF'; // UTF-8 BOM для корректного открытия в Excel
+      const csvContent = BOM + [headers, ...rows]
+        .map(row => row.map(cell => `"${String(cell == null ? '' : cell).replace(/"/g,'""')}"`).join(','))
+        .join('\r\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast(`Файл ${filename} скачан`, 'success');
+    }
+
+    // ─── Загрузка данных мониторинга ──────────────────────────────────────────
     async function loadMonitoringData(showToastAlert = false) {
       if (showToastAlert) {
         showToast("Обновление данных мониторинга...", "info");
@@ -2471,7 +3180,7 @@
       try {
         const [healthRes, historyRes] = await Promise.all([
           fetch("/api/system/health"),
-          fetch("/api/system/history")
+          fetch("/api/system/history?limit=50")
         ]);
 
         if (healthRes.ok) {
@@ -2481,7 +3190,12 @@
 
         if (historyRes.ok) {
           systemHistoryData = await historyRes.json();
-          renderHistoryUI(systemHistoryData);
+          renderHistoryUI(getFilteredRunsData());
+        }
+
+        // Параллельно обновить отфильтрованные, если вкладка открыта или уже загружалась
+        if (currentHistoryTab === 'filtered' || systemFilteredData.length > 0) {
+          loadFilteredTweets();
         }
 
         if (showToastAlert) {
@@ -2495,6 +3209,7 @@
       }
     }
 
+    // ─── Вспомогательные функции мониторинга сервисов ────────────────────────
     function updateMonitoringTabDot(status) {
       const dot = document.getElementById("monitoring-dot");
       if (!dot) return;
@@ -2516,7 +3231,6 @@
     function renderHealthUI(data) {
       if (!data) return;
       updateMonitoringTabDot(data.status);
-
       const services = data.services || {};
       renderServiceCard("twitter", services.twitter);
       renderServiceCard("gemini", services.gemini);
@@ -2529,18 +3243,12 @@
       const badgeEl = document.getElementById(`badge-${serviceKey}`);
       const descEl = document.getElementById(`desc-${serviceKey}`);
       const metaEl = document.getElementById(`meta-${serviceKey}`);
-
       if (!trafficEl || !badgeEl || !descEl) return;
-
       const st = svc.status || "pending";
       trafficEl.className = `traffic-light-indicator traffic-${st}`;
-
       badgeEl.className = `health-status-badge ${st}`;
       badgeEl.textContent = st === "ok" ? "В норме" : (st === "warning" ? "Внимание" : (st === "error" ? "Ошибка" : "Проверка..."));
-
       descEl.textContent = svc.message || "Нет данных";
-
-      // Meta details
       let metaText = "";
       if (serviceKey === "twitter" && svc.details) {
         const parts = [];
@@ -2556,9 +3264,7 @@
         if (svc.details.is_admin !== undefined) parts.push(svc.details.is_admin ? "Права: Администратор" : "Права: Не администратор");
         metaText = parts.join(" · ");
       }
-      if (metaEl) {
-        metaEl.textContent = metaText;
-      }
+      if (metaEl) metaEl.textContent = metaText;
     }
 
     async function checkSingleIntegration(serviceKey) {
@@ -2566,40 +3272,21 @@
       const trafficEl = document.getElementById(`traffic-${serviceKey}`);
       const badgeEl = document.getElementById(`badge-${serviceKey}`);
       const descEl = document.getElementById(`desc-${serviceKey}`);
-
       const origBtnHtml = btn ? btn.innerHTML : "";
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = `<span>Проверка...</span>`;
-      }
-      if (trafficEl) {
-        trafficEl.className = "traffic-light-indicator traffic-loading";
-      }
-      if (badgeEl) {
-        badgeEl.className = "health-status-badge pending";
-        badgeEl.textContent = "Проверка...";
-      }
-      if (descEl) {
-        descEl.textContent = "Выполняется запрос проверки связи...";
-      }
-
+      if (btn) { btn.disabled = true; btn.innerHTML = `<span>Проверка...</span>`; }
+      if (trafficEl) trafficEl.className = "traffic-light-indicator traffic-loading";
+      if (badgeEl) { badgeEl.className = "health-status-badge pending"; badgeEl.textContent = "Проверка..."; }
+      if (descEl) descEl.textContent = "Выполняется запрос проверки связи...";
       showToast(`Проверка соединения: ${serviceKey.toUpperCase()}...`, "info");
-
       try {
         const res = await fetch(`/api/system/health?service=${serviceKey}`);
         const data = await res.json();
         const svc = data.services && (data.services[serviceKey] || data.services.twitter || data.services.gemini || data.services.telegram);
         if (svc) {
           renderServiceCard(serviceKey, svc);
-          if (svc.status === "ok") {
-            showToast(`Соединение с ${svc.name || serviceKey} в порядке!`, "success");
-          } else if (svc.status === "warning") {
-            showToast(`Внимание: ${svc.message}`, "info");
-          } else {
-            showToast(`Ошибка: ${svc.message}`, "error");
-          }
-
-          // Update local status dot immediately without full 3-service reload
+          if (svc.status === "ok") showToast(`Соединение с ${svc.name || serviceKey} в порядке!`, "success");
+          else if (svc.status === "warning") showToast(`Внимание: ${svc.message}`, "info");
+          else showToast(`Ошибка: ${svc.message}`, "error");
           if (systemHealthData && systemHealthData.services) {
             systemHealthData.services[serviceKey] = svc;
             const statuses = Object.values(systemHealthData.services).map(s => s.status);
@@ -2613,19 +3300,14 @@
       } catch (err) {
         showToast(`Ошибка проверки: ${err.message}`, "error");
         if (trafficEl) trafficEl.className = "traffic-light-indicator traffic-error";
-        if (badgeEl) {
-          badgeEl.className = "health-status-badge error";
-          badgeEl.textContent = "Сбой";
-        }
+        if (badgeEl) { badgeEl.className = "health-status-badge error"; badgeEl.textContent = "Сбой"; }
         if (descEl) descEl.textContent = `Ошибка: ${err.message}`;
       } finally {
-        if (btn) {
-          btn.disabled = false;
-          btn.innerHTML = origBtnHtml;
-        }
+        if (btn) { btn.disabled = false; btn.innerHTML = origBtnHtml; }
       }
     }
 
+    // ─── Рендеринг таблицы истории запусков ──────────────────────────────────
     function renderHistoryUI(runs) {
       const tbody = document.getElementById("runs-table-body");
       if (!tbody) return;
@@ -2680,6 +3362,51 @@
       }).join("");
     }
 
+    // ─── Рендеринг таблицы отфильтрованных твитов ────────────────────────────
+    function renderFilteredUI(tweets) {
+      const tbody = document.getElementById('filtered-table-body');
+      if (!tbody) return;
+
+      if (!tweets || tweets.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" style="text-align: center; color: var(--tg-text-muted); padding: 36px 16px;">
+              <div style="margin-bottom: 8px; opacity:0.5;">🔍</div>
+              <div>Отфильтрованных твитов нет за выбранный период.<br>Запустите сбор, чтобы они появились здесь.</div>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = tweets.map((t, idx) => {
+        const collectedAt = formatDisplayDateTime(t.inserted_at) || escapeHtml(t.inserted_at || '');
+        const handle = (t.author_handle || '').replace(/^@/, '');
+        const authorHtml = handle
+          ? `<a href="https://x.com/${escapeHtml(handle)}" target="_blank" rel="noopener" style="color:var(--tg-primary);">@${escapeHtml(handle)}</a>`
+          : escapeHtml(t.author_name || '—');
+        const textPreview = escapeHtml((t.text_raw || '').slice(0, 100)) + ((t.text_raw || '').length > 100 ? '…' : '');
+        const score = parseFloat(t.viral_score || 0).toFixed(1);
+        const reason = escapeHtml(t.rejection_reason || '—');
+        const tweetUrl = escapeHtml(t.tweet_url || '');
+        const linkHtml = tweetUrl
+          ? `<a href="${tweetUrl}" target="_blank" rel="noopener" style="color:var(--tg-primary); font-size:0.8rem;" title="Открыть твит в X.com">↗ X.com</a>`
+          : '—';
+
+        return `
+          <tr>
+            <td style="font-family:'JetBrains Mono',monospace; color:var(--tg-text-dim); font-size:0.8rem;">${idx + 1}</td>
+            <td style="white-space:nowrap; font-size:0.82rem;">${collectedAt}</td>
+            <td style="white-space:nowrap;">${authorHtml}</td>
+            <td style="max-width:300px; font-size:0.82rem; line-height:1.4;" title="${escapeHtml((t.text_raw || '').slice(0,300))}">${textPreview}</td>
+            <td><span class="rejected-score-badge">⚡ ${score}</span></td>
+            <td class="rejection-reason-cell">${reason}</td>
+            <td>${linkHtml}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     function escapeHtml(text) {
       if (!text) return "";
       return String(text)
@@ -2691,9 +3418,41 @@
     }
 
     function getActiveTimezone() {
-      const sel = document.getElementById("header-timezone");
-      if (sel && sel.value) return sel.value;
-      return localStorage.getItem("app_timezone") || "Europe/Moscow";
+      return localStorage.getItem("app_timezone") || "auto";
+    }
+
+    function parseTimezoneOffset(value) {
+      const match = String(value || "").trim().toUpperCase().match(/^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$/);
+      if (!match) return null;
+      const hours = Number(match[2]);
+      const minutes = Number(match[3] || 0);
+      if (hours > 14 || minutes > 59 || (hours === 14 && minutes > 0)) return null;
+      const totalMinutes = (hours * 60) + minutes;
+      return match[1] === "-" ? -totalMinutes : totalMinutes;
+    }
+
+    function getTimezoneLabel(tz) {
+      if (tz === "auto") return "Локальное время";
+      const offset = parseTimezoneOffset(tz);
+      if (offset !== null) {
+        const sign = offset >= 0 ? "+" : "-";
+        const absolute = Math.abs(offset);
+        return `UTC${sign}${Math.floor(absolute / 60)}${absolute % 60 ? ":" + String(absolute % 60).padStart(2, "0") : ""}`;
+      }
+      return tz.split("/").pop().replace(/_/g, " ") || tz;
+    }
+
+    function formatClockTime(date, tz) {
+      const offset = parseTimezoneOffset(tz);
+      if (offset !== null) {
+        const shifted = new Date(date.getTime() + offset * 60000);
+        return new Intl.DateTimeFormat("ru-RU", {
+          timeZone: "UTC", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+        }).format(shifted);
+      }
+      const options = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
+      if (tz !== "auto") options.timeZone = tz;
+      return new Intl.DateTimeFormat("ru-RU", options).format(date);
     }
 
     function formatDisplayDateTime(dateStr, showSeconds = false) {
@@ -2715,6 +3474,7 @@
           return alt.toLocaleString('ru-RU');
         }
         const tz = getActiveTimezone();
+        const offset = parseTimezoneOffset(tz);
         const options = {
           day: '2-digit',
           month: '2-digit',
@@ -2723,6 +3483,11 @@
           minute: '2-digit',
           hour12: false
         };
+        if (offset !== null) {
+          const shifted = new Date(d.getTime() + offset * 60000);
+          options.timeZone = "UTC";
+          return new Intl.DateTimeFormat('ru-RU', options).format(shifted);
+        }
         if (tz && tz !== "auto") {
           options.timeZone = tz;
         }
@@ -3398,43 +4163,47 @@
     }
 
     // SETTINGS
-    function setDigestPreset(preset) {
-      document.getElementById("setting-digest-time").value = preset;
-      showToast("Выбрано расписание: " + preset, "info");
-    }
-
     async function loadSettings() {
       if (currentUser && currentUser.role !== "admin") return;
       try {
         const res = await fetch("/api/settings");
         if (!res.ok) return;
         const data = await res.json();
+        await loadDigestScheduleRules();
+        addSettingsFieldTooltips();
+        const savedTimezone = data.app_timezone || "";
+        const timezoneSelect = document.getElementById("setting-timezone");
+        const timezoneOffset = document.getElementById("setting-timezone-offset");
+        if (timezoneSelect && [...timezoneSelect.options].some(option => option.value === savedTimezone)) {
+          timezoneSelect.value = savedTimezone;
+          if (timezoneOffset) timezoneOffset.value = "";
+        } else if (timezoneOffset) {
+          timezoneOffset.value = savedTimezone;
+          if (timezoneSelect) timezoneSelect.value = "";
+        }
+        if (savedTimezone) setActiveTimezone(savedTimezone);
         document.getElementById("setting-min-score").value = data.min_viral_score || 75.0;
         document.getElementById("setting-super-score").value = data.super_viral_threshold || 100.0;
         document.getElementById("setting-max-posts").value = data.max_posts_per_run || 1;
-        document.getElementById("setting-interval").value = data.scheduler_interval_minutes || 120;
+        document.getElementById("setting-interval").value = data.scheduler_interval_minutes ?? "";
         document.getElementById("setting-delay").value = data.ai_request_delay_seconds !== undefined ? data.ai_request_delay_seconds : 12;
-        document.getElementById("setting-digest-time").value = data.daily_digest_time || "07:00, 14:00, 21:00";
-        document.getElementById("setting-quiet-enabled").checked = data.quiet_hours_enabled !== false;
-        document.getElementById("setting-quiet-start").value = data.quiet_hours_start || "22:00";
-        document.getElementById("setting-quiet-end").value = data.quiet_hours_end || "07:00";
+        document.getElementById("setting-quiet-enabled").checked = data.quiet_hours_enabled === true;
+        document.getElementById("setting-quiet-start").value = data.quiet_hours_start ?? "";
+        document.getElementById("setting-quiet-end").value = data.quiet_hours_end ?? "";
         document.getElementById("setting-channel").value = data.telegram_channel_id || "";
         document.getElementById("setting-model").value = data.ai_model_name || "gemini-3.5-flash-lite, gemini-3.1-flash-lite";
 
         if (document.getElementById("setting-queue-sort-strategy")) {
           document.getElementById("setting-queue-sort-strategy").value = data.queue_sort_strategy || "BY_VIRAL_SCORE";
         }
-        if (document.getElementById("setting-max-digest-items")) {
-          document.getElementById("setting-max-digest-items").value = data.max_digest_items || 10;
-        }
         if (document.getElementById("setting-scout-interval")) {
-          document.getElementById("setting-scout-interval").value = data.scout_interval_minutes || 15;
+          document.getElementById("setting-scout-interval").value = data.scout_interval_minutes ?? "";
         }
-        if (document.getElementById("setting-backlog-chunk-size")) {
-          document.getElementById("setting-backlog-chunk-size").value = data.backlog_max_chunk_size || 6;
+        if (document.getElementById("setting-metric-refresh-limit")) {
+          document.getElementById("setting-metric-refresh-limit").value = data.metric_refresh_limit ?? 20;
         }
-        if (document.getElementById("setting-backlog-enabled")) {
-          document.getElementById("setting-backlog-enabled").checked = data.backlog_digest_enabled !== false;
+        if (document.getElementById("setting-metric-refresh-hours")) {
+          document.getElementById("setting-metric-refresh-hours").value = data.metric_refresh_hours ?? 48;
         }
 
         if (document.getElementById("setting-show-likes")) document.getElementById("setting-show-likes").checked = data.show_metric_likes !== false;
@@ -3475,6 +4244,15 @@
       }
     }
 
+    function addSettingsFieldTooltips() {
+      document.querySelectorAll("#tab-settings input, #tab-settings select, #tab-settings textarea").forEach((field) => {
+        if (field.title) return;
+        const label = field.id ? document.querySelector(`label[for="${field.id}"]`) : null;
+        const labelText = label ? label.textContent.trim() : (field.getAttribute("aria-label") || field.getAttribute("placeholder") || "Параметр настройки");
+        field.title = labelText;
+      });
+    }
+
     async function saveSettings(e) {
       e.preventDefault();
       const form = document.getElementById("settings-form");
@@ -3485,28 +4263,36 @@
         max_posts_per_run: parseInt(formData.get("max_posts_per_run")),
         scheduler_interval_minutes: parseInt(formData.get("scheduler_interval_minutes")),
         ai_request_delay_seconds: parseInt(formData.get("ai_request_delay_seconds")),
-        daily_digest_time: formData.get("daily_digest_time"),
         quiet_hours_enabled: document.getElementById("setting-quiet-enabled").checked,
-        quiet_hours_start: document.getElementById("setting-quiet-start").value.trim() || "22:00",
-        quiet_hours_end: document.getElementById("setting-quiet-end").value.trim() || "07:00",
+        quiet_hours_start: document.getElementById("setting-quiet-start").value.trim(),
+        quiet_hours_end: document.getElementById("setting-quiet-end").value.trim(),
         telegram_channel_id: formData.get("telegram_channel_id"),
         ai_model_name: formData.get("ai_model_name"),
       };
 
+      const timezoneSelect = document.getElementById("setting-timezone");
+      const timezoneOffset = document.getElementById("setting-timezone-offset");
+      const selectedTimezone = timezoneOffset && timezoneOffset.value.trim()
+        ? timezoneOffset.value.trim()
+        : (timezoneSelect ? timezoneSelect.value : "");
+      const offset = parseTimezoneOffset(selectedTimezone);
+      if (selectedTimezone && offset === null && selectedTimezone !== "UTC" && selectedTimezone.indexOf("/") === -1) {
+        showToast("Введите смещение в формате +4, -3 или +04:30", "error");
+        return;
+      }
+      payload.app_timezone = selectedTimezone || null;
+
       if (document.getElementById("setting-queue-sort-strategy")) {
         payload.queue_sort_strategy = document.getElementById("setting-queue-sort-strategy").value;
       }
-      if (document.getElementById("setting-max-digest-items")) {
-        payload.max_digest_items = parseInt(document.getElementById("setting-max-digest-items").value) || 10;
-      }
       if (document.getElementById("setting-scout-interval")) {
-        payload.scout_interval_minutes = parseInt(document.getElementById("setting-scout-interval").value) || 15;
+        payload.scout_interval_minutes = parseInt(document.getElementById("setting-scout-interval").value) || null;
       }
-      if (document.getElementById("setting-backlog-chunk-size")) {
-        payload.backlog_max_chunk_size = parseInt(document.getElementById("setting-backlog-chunk-size").value) || 6;
+      if (document.getElementById("setting-metric-refresh-limit")) {
+        payload.metric_refresh_limit = parseInt(document.getElementById("setting-metric-refresh-limit").value, 10);
       }
-      if (document.getElementById("setting-backlog-enabled")) {
-        payload.backlog_digest_enabled = document.getElementById("setting-backlog-enabled").checked;
+      if (document.getElementById("setting-metric-refresh-hours")) {
+        payload.metric_refresh_hours = parseInt(document.getElementById("setting-metric-refresh-hours").value, 10);
       }
 
       if (document.getElementById("setting-show-likes")) payload.show_metric_likes = document.getElementById("setting-show-likes").checked;
@@ -3550,6 +4336,7 @@
           body: JSON.stringify(payload)
         });
         if (res.ok) {
+          setActiveTimezone(selectedTimezone, true);
           showToast("Настройки успешно сохранены!", "success");
           pollApiStatus();
           loadSettings();
@@ -3558,6 +4345,99 @@
         }
       } catch (err) {
         showToast("Ошибка: " + err.message, "error");
+      }
+    }
+
+    async function loadDigestScheduleRules() {
+      const list = document.getElementById("digest-schedules-list");
+      if (!list) return;
+      try {
+        const res = await fetch("/api/digest-schedules");
+        if (!res.ok) return;
+        const rules = await res.json();
+        list.innerHTML = rules.length ? rules.map(rule => `
+          <div class="digest-schedule-row" style="padding:7px 8px; background:var(--tg-button-bg); border-radius:6px;">
+            <span class="digest-schedule-time" style="font-family:monospace; color:var(--tg-primary);">${escapeHtml(rule.time)}</span>
+            <span class="digest-schedule-title">${escapeHtml(rule.title)}</span>
+            <small class="digest-schedule-meta" style="color:var(--tg-text-muted);">${rule.max_posts} сообщ. за запуск · ${rule.max_items_per_post} новостей/сообщ. · пауза ${rule.interval_minutes} мин. · ${digestScheduleSortLabel(rule.sort_order)}</small>
+            <button type="button" class="btn btn-sm" onclick="editDigestScheduleRule(${rule.id})">Изменить</button>
+            <button type="button" class="btn btn-sm btn-danger" onclick="deleteDigestScheduleRule(${rule.id})">Удалить</button>
+          </div>`).join("") : '<span class="form-hint">Правила ещё не созданы.</span>';
+        window.digestScheduleRules = rules;
+      } catch (err) {
+        console.error("Не удалось загрузить расписания дайджестов:", err);
+      }
+    }
+
+    function digestScheduleSortLabel(sortOrder) {
+      const labels = {
+        BY_VIRAL_SCORE: "популярность",
+        CHRONOLOGICAL_DESC: "новые сначала",
+        CHRONOLOGICAL_ASC: "старые сначала",
+        RANDOM: "случайно",
+      };
+      return labels[sortOrder] || sortOrder || "популярность";
+    }
+
+    function resetDigestScheduleForm() {
+      document.getElementById("digest-schedule-id").value = "";
+      document.getElementById("digest-rule-time").value = "07:00";
+      document.getElementById("digest-rule-title").value = "Дайджест новостей";
+      document.getElementById("digest-rule-items").value = 5;
+      document.getElementById("digest-rule-posts").value = 1;
+      document.getElementById("digest-rule-sort").value = "BY_VIRAL_SCORE";
+      document.getElementById("digest-rule-interval").value = 5;
+    }
+
+    function editDigestScheduleRule(ruleId) {
+      const rule = (window.digestScheduleRules || []).find(item => item.id === ruleId);
+      if (!rule) return;
+      document.getElementById("digest-schedule-id").value = rule.id;
+      document.getElementById("digest-rule-time").value = rule.time;
+      document.getElementById("digest-rule-title").value = rule.title;
+      document.getElementById("digest-rule-items").value = rule.max_items_per_post;
+      document.getElementById("digest-rule-posts").value = rule.max_posts;
+      document.getElementById("digest-rule-sort").value = rule.sort_order;
+      document.getElementById("digest-rule-interval").value = rule.interval_minutes;
+    }
+
+    async function saveDigestScheduleRule() {
+      const id = document.getElementById("digest-schedule-id").value;
+      const payload = {
+        time: document.getElementById("digest-rule-time").value,
+        title: document.getElementById("digest-rule-title").value.trim(),
+        max_items_per_post: parseInt(document.getElementById("digest-rule-items").value, 10),
+        max_posts: parseInt(document.getElementById("digest-rule-posts").value, 10),
+        sort_order: document.getElementById("digest-rule-sort").value,
+        interval_minutes: parseInt(document.getElementById("digest-rule-interval").value, 10),
+        enabled: true,
+      };
+      try {
+        const res = await fetch(id ? `/api/digest-schedules/${id}` : "/api/digest-schedules", {
+          method: id ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Ошибка сохранения правила");
+        showToast("Правило дайджеста сохранено", "success");
+        resetDigestScheduleForm();
+        await loadDigestScheduleRules();
+      } catch (err) {
+        showToast(err.message, "error");
+      }
+    }
+
+    async function deleteDigestScheduleRule(ruleId) {
+      if (!confirm("Удалить это правило дайджеста?")) return;
+      try {
+        const res = await fetch(`/api/digest-schedules/${ruleId}`, { method: "DELETE" });
+        if (!res.ok) throw new Error("Не удалось удалить правило");
+        resetDigestScheduleForm();
+        await loadDigestScheduleRules();
+        showToast("Правило дайджеста удалено", "success");
+      } catch (err) {
+        showToast(err.message, "error");
       }
     }
 
@@ -3956,6 +4836,75 @@
       }
     }
 
+    async function handleTwitterManualCookiesSave(e) {
+      e.preventDefault();
+      const authToken = document.getElementById("tw-cookie-auth-token").value.trim();
+      const ct0 = document.getElementById("tw-cookie-ct0").value.trim();
+      if (!authToken || !ct0) {
+        showToast("Необходимо заполнить оба поля: auth_token и ct0", "error");
+        return;
+      }
+      const btn = document.getElementById("btn-tw-save-cookies");
+      btn.disabled = true;
+      btn.textContent = "Сохранение...";
+      try {
+        const res = await fetch("/api/twitter/cookies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auth_token: authToken, ct0: ct0 }),
+        });
+        const data = await res.json();
+        if (res.ok && data.status === "ok") {
+          showToast("Cookies X успешно сохранены!", "success");
+          document.getElementById("tw-cookie-auth-token").value = "";
+          document.getElementById("tw-cookie-ct0").value = "";
+          loadMonitoringData(false);
+          checkSingleIntegration('twitter');
+        } else {
+          showToast("Ошибка сохранения cookies: " + (data.error || data.message), "error");
+        }
+      } catch (err) {
+        showToast("Ошибка сети при сохранении: " + err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Сохранить Cookies';
+      }
+    }
+
+    async function handleTwitterCookieFileUpload(e) {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async function(evt) {
+        try {
+          const parsed = JSON.parse(evt.target.result);
+          const res = await fetch("/api/twitter/cookies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cookies: parsed }),
+          });
+          const data = await res.json();
+          if (res.ok && data.status === "ok") {
+            showToast("Файл cookies.json успешно загружен и применён!", "success");
+            loadMonitoringData(false);
+            checkSingleIntegration('twitter');
+          } else {
+            showToast("Ошибка импорта файла: " + (data.error || data.message), "error");
+          }
+        } catch (err) {
+          showToast("Некорректный JSON файл: " + err.message, "error");
+        } finally {
+          e.target.value = "";
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function viewDebugScreenshot() {
+      const url = "/api/twitter/debug-screenshot?t=" + Date.now();
+      window.open(url, "_blank");
+    }
+
     // DATA MANAGEMENT
     async function handleExportData() {
       const start = document.getElementById("data-start-date").value;
@@ -4016,30 +4965,84 @@
 
     // MANUAL TRIGGERS
     async function triggerPipeline() {
+      if (pipelinePollInterval) return;
+      setPipelineButtonsDisabled(true);
       try {
         showToast("Запуск сбора постов (Scout)...", "info");
         const res = await fetch("/api/pipeline/run", { method: "POST" });
         if (res.ok) {
-          showToast("Сбор запущен! Обновление данных через 10 сек...", "success");
-          setTimeout(() => {
-            loadAllData();
-            loadMonitoringData(false);
-          }, 10000);
+          pipelineWasStarted = true;
+          showToast("Сбор запущен. Отслеживаю выполнение...", "success");
+          pollPipelineStatus();
+          pipelinePollInterval = setInterval(pollPipelineStatus, 2500);
+        } else if (res.status === 409) {
+          setPipelineButtonsDisabled(true);
+          showToast("Сбор уже выполняется", "info");
+          pollPipelineStatus();
+          pipelinePollInterval = setInterval(pollPipelineStatus, 2500);
+        } else {
+          setPipelineButtonsDisabled(false);
+          showToast("Не удалось запустить сбор", "error");
         }
       } catch (err) {
+        setPipelineButtonsDisabled(false);
         showToast("Ошибка запуска: " + err.message, "error");
       }
     }
 
-    async function triggerDigest() {
+    function setPipelineButtonsDisabled(disabled) {
+      document.querySelectorAll('[onclick="triggerPipeline()"], [onclick="triggerPipeline()"] *').forEach((element) => {
+        const button = element.closest('button');
+        if (button) button.disabled = disabled;
+      });
+      document.querySelectorAll('[onclick="triggerPipeline()"]').forEach((button) => {
+        button.disabled = disabled;
+        button.style.opacity = disabled ? "0.55" : "";
+        button.style.cursor = disabled ? "wait" : "";
+      });
+    }
+
+    async function pollPipelineStatus() {
       try {
-        showToast("Запуск генерации дайджеста...", "info");
-        const res = await fetch("/api/digest/run", { method: "POST" });
-        if (res.ok) {
-          showToast("Дайджест собирается и будет опубликован в Telegram!", "success");
+        const res = await fetch("/api/pipeline/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        updatePipelineStatusUI(data);
+        if (data.state === "running") {
+          setPipelineButtonsDisabled(true);
+          return;
+        }
+        if (!pipelineWasStarted) return;
+
+        clearInterval(pipelinePollInterval);
+        pipelinePollInterval = null;
+        pipelineWasStarted = false;
+        setPipelineButtonsDisabled(false);
+        await loadAllData();
+
+        if (data.state === "success") {
+          showToast(`Сбор завершён. Найдено: ${data.tweets_found}, прошло фильтр: ${data.viral_found}`, "success");
+        } else if (data.state === "error") {
+          showToast("Сбор завершился с ошибкой", "error");
         }
       } catch (err) {
-        showToast("Ошибка запуска: " + err.message, "error");
+        console.error("Pipeline status polling error:", err);
+      }
+    }
+
+    async function resumePipelinePolling() {
+      try {
+        const res = await fetch("/api/pipeline/status", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        updatePipelineStatusUI(data);
+        if (data.state === "running" && !pipelinePollInterval) {
+          pipelineWasStarted = true;
+          setPipelineButtonsDisabled(true);
+          pipelinePollInterval = setInterval(pollPipelineStatus, 2500);
+        }
+      } catch (err) {
+        console.error("Pipeline status initialization error:", err);
       }
     }
 
@@ -4083,15 +5086,13 @@
     });
 
     // Timezone and Clock
-    function updateHeaderTimezone() {
-      const sel = document.getElementById("header-timezone");
-      if (!sel) return;
-      const tz = sel.value;
-      localStorage.setItem("app_timezone", tz);
-      showToast("Часовой пояс изменен: " + tz, "info");
+    function setActiveTimezone(tz, notify = false) {
+      const normalized = String(tz || "").trim() || "auto";
+      localStorage.setItem("app_timezone", normalized);
       updateClock();
       if (window.queueData) renderQueueGrid(window.queueData);
       if (window.publishedData) renderPublishedGrid(window.publishedData);
+      if (notify) showToast("Часовой пояс изменен: " + getTimezoneLabel(normalized), "info");
     }
 
     function updateClock() {
@@ -4100,16 +5101,9 @@
       const tz = getActiveTimezone();
       try {
         const now = new Date();
-        const options = {
-          hour: '2-digit', minute: '2-digit', second: '2-digit',
-          hour12: false
-        };
-        if (tz && tz !== "auto") {
-          options.timeZone = tz === 'UTC' ? 'UTC' : tz;
-        }
-        const timeStr = new Intl.DateTimeFormat('ru-RU', options).format(now);
-        const label = tz === 'auto' ? 'Local' : (tz.split('/').pop() || tz);
-        el.textContent = `${timeStr} (${label})`;
+        el.textContent = formatClockTime(now, tz);
+        const zoneEl = document.getElementById("current-server-zone");
+        if (zoneEl) zoneEl.textContent = getTimezoneLabel(tz);
       } catch (e) {
         el.textContent = new Date().toISOString().split("T")[1].split(".")[0] + " UTC";
       }
@@ -4118,8 +5112,12 @@
     setInterval(updateClock, 1000);
     document.addEventListener("DOMContentLoaded", () => {
       const tz = localStorage.getItem("app_timezone");
-      const sel = document.getElementById("header-timezone");
-      if (sel && tz) sel.value = tz;
+      if (tz) {
+        const select = document.getElementById("setting-timezone");
+        const offsetInput = document.getElementById("setting-timezone-offset");
+        if (select && [...select.options].some(option => option.value === tz)) select.value = tz;
+        else if (offsetInput) offsetInput.value = tz;
+      }
       updateClock();
     });
 

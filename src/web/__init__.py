@@ -1,1 +1,1 @@
-"""Web Dashboard module for AI Viral Hunter."""
+"""Web Dashboard module for Viral Hunter."""

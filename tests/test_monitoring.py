@@ -180,8 +180,8 @@ async def test_check_twitter_health_unauthorized(monkeypatch):
 @pytest.mark.asyncio
 async def test_check_twitter_health_transient_warning(monkeypatch):
     """Verifies check_twitter_health returns warning on transient network error."""
-    monkeypatch.setattr(settings, "twitter_auth_token", "token")
-    monkeypatch.setattr(settings, "twitter_ct0", "ct0")
+    monkeypatch.setattr(settings, "twitter_auth_token", "token_valid_123")
+    monkeypatch.setattr(settings, "twitter_ct0", "ct0_valid_123")
 
     mock_client = MagicMock()
     mock_client.user = AsyncMock(side_effect=TimeoutError("Connection timed out"))

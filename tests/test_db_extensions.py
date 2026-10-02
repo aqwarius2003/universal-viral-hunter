@@ -1,5 +1,6 @@
 import os
 import pytest
+from unittest.mock import AsyncMock
 from datetime import datetime, timezone, timedelta
 from src.config import settings
 from src.db import (
@@ -410,11 +411,16 @@ async def test_staging_tweets_sorting_strategies(temp_db_path):
 
 
 @pytest.mark.asyncio
-async def test_due_scheduled_digests_and_scheduler_publish(temp_db_path, mocker):
+async def test_due_scheduled_digests_and_scheduler_publish(temp_db_path, mocker, monkeypatch):
     """Verifies that scheduled digests due for publication are detected and published by scheduler."""
+    from src.config import settings
     from src.db import init_db, create_digest_draft, get_due_scheduled_digests, normalize_to_utc_iso
     from src.scheduler import check_and_publish_scheduled_digests
     import aiosqlite
+
+    monkeypatch.setattr(settings, "ai_api_key", "test_gemini_key")
+    monkeypatch.setattr(settings, "telegram_bot_token", "123456789:ABCDefGhIjKlMnOpQrStUvWxYz")
+    monkeypatch.setattr(settings, "telegram_channel_id", "@test_channel")
 
     await init_db()
     did1 = await create_digest_draft("Past Due Digest", "Formatted text 1", [])
@@ -432,7 +438,7 @@ async def test_due_scheduled_digests_and_scheduler_publish(temp_db_path, mocker)
     assert len(due) == 1
     assert due[0]["id"] == did1
 
-    mock_send = mocker.patch("src.telegram.sender.send_post_to_channel", return_value=8888)
+    mock_send = mocker.patch("src.telegram.sender.send_post_to_channel", AsyncMock(return_value=8888))
     published_count = await check_and_publish_scheduled_digests()
     assert published_count == 1
 

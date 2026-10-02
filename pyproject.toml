@@ -1,7 +1,7 @@
 [project]
-name = "ai-viral-hunter"
+name = "viral-hunter"
 version = "0.1.0"
-description = "AI Viral Hunter with LangGraph"
+description = "Viral Hunter with LangGraph"
 authors = [
     {name = "aqwarius2003",email = "00victorr@gmail.com"}
 ]
@@ -14,6 +14,7 @@ dependencies = [
     "aiogram (>=3.31.0,<4.0.0)",
     "google-genai (>=2.23.0,<3.0.0)",
     "twifork (>=2.4.0,<3.0.0)",
+    "playwright (>=1.40.0,<2.0.0)",
 ]
 
 

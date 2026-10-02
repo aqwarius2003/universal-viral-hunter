@@ -47,7 +47,7 @@ async def run_pipeline():
         app = workflow.compile()
 
         # 3. Запуск графа
-        print("Запуск пайплайна AI Viral Hunter...")
+        print("Запуск пайплайна Viral Hunter...")
         
         # Передаем пустое начальное состояние
         initial_state = {

@@ -23,14 +23,16 @@ from src.config import settings
 from src.db import update_tweet_status_and_score
 from src.utils.hashtags import normalize_hashtags
 
-logger = logging.getLogger("ai-viral-hunter.editor")
+logger = logging.getLogger("viral-hunter.editor")
 
-client = genai.Client(api_key=settings.ai_api_key)
+client: Optional[genai.Client] = None
 
 
 def get_client() -> genai.Client:
     global client
     if client is None:
+        if not settings.ai_api_key or settings.ai_api_key.startswith("your_"):
+            raise RuntimeError("AI_API_KEY is not configured. Complete the setup in the web dashboard.")
         client = genai.Client(api_key=settings.ai_api_key)
     return client
 

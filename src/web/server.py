@@ -33,6 +33,7 @@ from src.db import (
     get_published_posts,
     get_queued_posts,
     get_recent_pipeline_runs,
+    get_filtered_tweets,
     get_tweet_by_id,
     init_db,
     mark_post_published,
@@ -54,6 +55,9 @@ from src.db import (
     create_digest_draft,
     publish_digest,
     get_digests_list,
+    get_digest_schedules,
+    save_digest_schedule,
+    delete_digest_schedule,
     normalize_to_utc_iso,
 )
 from src.digest import run_daily_digest
@@ -68,6 +72,15 @@ from src.ai.agents.scout import (
 STATIC_DIR = Path(__file__).parent / "static"
 
 login_limiter = LoginRateLimiter(max_attempts=5, window_seconds=300, lockout_seconds=900)
+pipeline_lock = asyncio.Lock()
+pipeline_runtime = {
+    "state": "idle",
+    "tweets_found": 0,
+    "viral_found": 0,
+    "error_message": None,
+    "started_at": None,
+    "finished_at": None,
+}
 
 
 def get_client_ip(request: web.Request) -> str:
@@ -131,8 +144,11 @@ async def auth_middleware(request: web.Request, handler):
     role = payload.get("role", "editor")
     admin_only_prefixes = (
         "/api/settings",
+        "/api/digest-schedules",
         "/api/users",
         "/api/twitter/login",
+        "/api/twitter/cookies",
+        "/api/twitter/debug-screenshot",
         "/api/system/backup",
     )
     if any(path.startswith(p) for p in admin_only_prefixes):
@@ -260,12 +276,14 @@ async def handle_update_schedule(request: web.Request) -> web.Response:
 async def handle_auto_schedule(request: web.Request) -> web.Response:
     """Automatically assigns spaced publication times for all queued posts."""
     await init_db()
-    interval = settings.scheduler_interval_minutes
+    interval = settings.scheduler_interval_minutes or 120
     tz_offset_minutes = None
     try:
         data = await request.json()
         if isinstance(data, dict):
             tz_offset_minutes = data.get("tz_offset_minutes")
+            if "interval_minutes" in data and data["interval_minutes"]:
+                interval = int(data["interval_minutes"])
     except Exception:
         pass
 
@@ -664,6 +682,77 @@ async def handle_twitter_login(request: web.Request) -> web.Response:
         return web.json_response(res, status=400)
 
 
+async def handle_save_twitter_cookies(request: web.Request) -> web.Response:
+    """Saves user-provided session cookies (auth_token & ct0 or full cookies JSON) directly."""
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"error": "Invalid JSON body"}, status=400)
+
+    auth_token = str(data.get("auth_token") or "").strip()
+    ct0 = str(data.get("ct0") or "").strip()
+    raw_cookies = data.get("cookies")
+
+    cookies_dict: Dict[str, str] = {}
+    if isinstance(raw_cookies, dict):
+        cookies_dict = {str(k): str(v) for k, v in raw_cookies.items()}
+    elif isinstance(raw_cookies, list):
+        for item in raw_cookies:
+            if isinstance(item, dict) and "name" in item and "value" in item:
+                cookies_dict[str(item["name"])] = str(item["value"])
+
+    if auth_token:
+        cookies_dict["auth_token"] = auth_token
+    if ct0:
+        cookies_dict["ct0"] = ct0
+
+    final_auth_token = cookies_dict.get("auth_token")
+    final_ct0 = cookies_dict.get("ct0")
+
+    if not final_auth_token or not final_ct0:
+        return web.json_response(
+            {"error": "Необходимо указать как минимум auth_token и ct0"},
+            status=400,
+        )
+
+    # Save to data/cookies.json and cookies.json
+    target_p = Path(settings.cookies_path)
+    target_p.parent.mkdir(parents=True, exist_ok=True)
+    with open(target_p, "w", encoding="utf-8") as f:
+        json.dump(cookies_dict, f, indent=2)
+
+    root_p = Path("cookies.json")
+    with open(root_p, "w", encoding="utf-8") as f:
+        json.dump(cookies_dict, f, indent=2)
+
+    # Update runtime settings and persistent .env
+    settings.twitter_auth_token = final_auth_token
+    settings.twitter_ct0 = final_ct0
+    await save_system_settings_dual({
+        "twitter_auth_token": final_auth_token,
+        "twitter_ct0": final_ct0,
+    })
+
+    return web.json_response({
+        "status": "ok",
+        "message": f"Cookies успешно сохранены в {target_p} и применены в настройках!",
+        "has_auth_token": True,
+        "has_ct0": True,
+    })
+
+
+async def handle_twitter_debug_screenshot(request: web.Request) -> web.Response:
+    """Returns the last login error screenshot if available."""
+    target_p = Path(settings.cookies_path).parent / "login_failed.png"
+    if not target_p.is_file():
+        target_p = Path("data/login_failed.png")
+    if not target_p.is_file():
+        target_p = Path("login_failed.png")
+    if not target_p.is_file():
+        return web.json_response({"error": "Скриншот ошибки не найден"}, status=404)
+    return web.FileResponse(target_p, headers={"Content-Type": "image/png"})
+
+
 async def handle_system_backup(request: web.Request) -> web.Response:
     """Downloads the active SQLite database file as a backup."""
     db_file = Path(settings.db_path)
@@ -704,7 +793,9 @@ async def handle_get_settings(request: web.Request) -> web.Response:
         "is_configured": settings.is_configured(),
         "x_search_queries": getattr(settings, "x_search_queries", ""),
         "x_relevance_prompt": getattr(settings, "x_relevance_prompt", ""),
-        "scout_interval_minutes": getattr(settings, "scout_interval_minutes", 15),
+        "scout_interval_minutes": getattr(settings, "scout_interval_minutes", None),
+        "metric_refresh_hours": getattr(settings, "metric_refresh_hours", 48),
+        "metric_refresh_limit": getattr(settings, "metric_refresh_limit", 20),
         "editor_system_prompt": getattr(settings, "editor_system_prompt", ""),
         "editor_prompt_template": getattr(settings, "editor_prompt_template", ""),
         "show_metric_likes": getattr(settings, "show_metric_likes", True),
@@ -718,8 +809,56 @@ async def handle_get_settings(request: web.Request) -> web.Response:
         "queue_sort_strategy": getattr(settings, "queue_sort_strategy", "BY_VIRAL_SCORE"),
         "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
         "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
-        "app_timezone": getattr(settings, "app_timezone", "auto"),
+        "app_timezone": getattr(settings, "app_timezone", None),
     })
+
+
+def _normalize_digest_schedule_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    raw_time = str(data.get("time", "")).strip()
+    if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", raw_time):
+        raise ValueError("Время должно быть в формате HH:MM")
+    title = str(data.get("title", "Дайджест новостей")).strip() or "Дайджест новостей"
+    sort_order = str(data.get("sort_order", "BY_VIRAL_SCORE")).strip()
+    if sort_order not in ("BY_VIRAL_SCORE", "CHRONOLOGICAL_DESC", "CHRONOLOGICAL_ASC", "RANDOM"):
+        raise ValueError("Недопустимый порядок сортировки")
+    return {
+        "time": raw_time,
+        "title": title,
+        "max_items_per_post": max(1, min(50, int(data.get("max_items_per_post", 5)))),
+        "max_posts": max(1, min(20, int(data.get("max_posts", 1)))),
+        "sort_order": sort_order,
+        "interval_minutes": max(0, min(1440, int(data.get("interval_minutes", 5)))),
+        "enabled": bool(data.get("enabled", True)),
+    }
+
+
+async def handle_get_digest_schedules(request: web.Request) -> web.Response:
+    await init_db()
+    return web.json_response(await get_digest_schedules())
+
+
+async def handle_create_digest_schedule(request: web.Request) -> web.Response:
+    try:
+        payload = _normalize_digest_schedule_payload(await request.json())
+        schedule_id = await save_digest_schedule(payload)
+        return web.json_response({"status": "created", "id": schedule_id, "schedule": payload}, status=201)
+    except (ValueError, TypeError, json.JSONDecodeError) as err:
+        return web.json_response({"error": str(err)}, status=400)
+
+
+async def handle_update_digest_schedule(request: web.Request) -> web.Response:
+    try:
+        payload = _normalize_digest_schedule_payload(await request.json())
+        schedule_id = int(request.match_info["id"])
+        await save_digest_schedule(payload, schedule_id=schedule_id)
+        return web.json_response({"status": "updated", "id": schedule_id})
+    except (ValueError, TypeError, json.JSONDecodeError) as err:
+        return web.json_response({"error": str(err)}, status=400)
+
+
+async def handle_delete_digest_schedule(request: web.Request) -> web.Response:
+    await delete_digest_schedule(int(request.match_info["id"]))
+    return web.json_response({"status": "deleted"})
 
 
 def update_env_file(key_values: Dict[str, Any], env_path: Optional[str] = None) -> None:
@@ -796,7 +935,9 @@ async def handle_update_settings(request: web.Request) -> web.Response:
         db_updates["max_posts_per_run"] = int(data["max_posts_per_run"])
 
     if "scheduler_interval_minutes" in data:
-        db_updates["scheduler_interval_minutes"] = int(data["scheduler_interval_minutes"])
+        value = data["scheduler_interval_minutes"]
+        if value not in (None, ""):
+            db_updates["scheduler_interval_minutes"] = int(value)
 
     if "ai_request_delay_seconds" in data:
         db_updates["ai_request_delay_seconds"] = max(0, int(data["ai_request_delay_seconds"]))
@@ -809,8 +950,7 @@ async def handle_update_settings(request: web.Request) -> web.Response:
         from src.scheduler import normalize_schedule_times
         cleaned_list = normalize_schedule_times(raw_digest_time)
         cleaned_times = ", ".join(cleaned_list)
-        if cleaned_times:
-            db_updates["daily_digest_time"] = cleaned_times
+        db_updates["daily_digest_time"] = cleaned_times or None
     def normalize_time(t_str: str) -> str:
         t_str = t_str.strip().lower()
         if not t_str:
@@ -835,13 +975,11 @@ async def handle_update_settings(request: web.Request) -> web.Response:
 
     if "quiet_hours_start" in data:
         qh_start = normalize_time(str(data["quiet_hours_start"]))
-        if qh_start:
-            db_updates["quiet_hours_start"] = qh_start
+        db_updates["quiet_hours_start"] = qh_start or None
 
     if "quiet_hours_end" in data:
         qh_end = normalize_time(str(data["quiet_hours_end"]))
-        if qh_end:
-            db_updates["quiet_hours_end"] = qh_end
+        db_updates["quiet_hours_end"] = qh_end or None
 
     if "digest_pre_sleep_minutes" in data:
         db_updates["digest_pre_sleep_minutes"] = max(1, int(data["digest_pre_sleep_minutes"]))
@@ -889,7 +1027,15 @@ async def handle_update_settings(request: web.Request) -> web.Response:
             db_updates[string_setting] = str(data[string_setting]).strip()
 
     if "scout_interval_minutes" in data:
-        db_updates["scout_interval_minutes"] = max(1, int(data["scout_interval_minutes"]))
+        value = data["scout_interval_minutes"]
+        if value not in (None, ""):
+            db_updates["scout_interval_minutes"] = max(1, int(value))
+
+    if "metric_refresh_hours" in data:
+        db_updates["metric_refresh_hours"] = max(1, min(720, int(data["metric_refresh_hours"])))
+
+    if "metric_refresh_limit" in data:
+        db_updates["metric_refresh_limit"] = max(1, min(500, int(data["metric_refresh_limit"])))
 
     if "max_digest_items" in data:
         db_updates["max_digest_items"] = max(1, int(data["max_digest_items"]))
@@ -935,6 +1081,8 @@ async def handle_update_settings(request: web.Request) -> web.Response:
             "x_search_queries": getattr(settings, "x_search_queries", ""),
             "x_relevance_prompt": getattr(settings, "x_relevance_prompt", ""),
             "scout_interval_minutes": getattr(settings, "scout_interval_minutes", 15),
+            "metric_refresh_hours": getattr(settings, "metric_refresh_hours", 48),
+            "metric_refresh_limit": getattr(settings, "metric_refresh_limit", 20),
             "editor_system_prompt": getattr(settings, "editor_system_prompt", ""),
             "editor_prompt_template": getattr(settings, "editor_prompt_template", ""),
             "show_metric_likes": getattr(settings, "show_metric_likes", True),
@@ -948,22 +1096,53 @@ async def handle_update_settings(request: web.Request) -> web.Response:
             "queue_sort_strategy": getattr(settings, "queue_sort_strategy", "BY_VIRAL_SCORE"),
             "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
             "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
-            "app_timezone": getattr(settings, "app_timezone", "auto"),
+            "app_timezone": getattr(settings, "app_timezone", None),
         }
     })
 
 
 async def _safe_run_pipeline() -> None:
+    pipeline_runtime["state"] = "running"
+    pipeline_runtime["started_at"] = datetime.now(timezone.utc).isoformat()
+    pipeline_runtime["finished_at"] = None
+    pipeline_runtime["error_message"] = None
     try:
-        await run_pipeline()
+        result = await run_pipeline()
+        pipeline_runtime["state"] = "success"
+        pipeline_runtime["tweets_found"] = len(result.get("raw_tweets", []))
+        pipeline_runtime["viral_found"] = len(result.get("viral_tweets", []))
     except Exception as e:
+        pipeline_runtime["state"] = "error"
+        pipeline_runtime["error_message"] = str(e)
         print(f"⚠️ Фоновый запуск пайплайна завершился с ошибкой: {e}")
+    finally:
+        pipeline_runtime["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
 async def handle_run_pipeline(request: web.Request) -> web.Response:
     """Triggers an on-demand background pipeline run."""
-    asyncio.create_task(_safe_run_pipeline())
+    if pipeline_lock.locked() or pipeline_runtime["state"] == "running":
+        return web.json_response(
+            {"status": "pipeline_running", "message": "Pipeline уже выполняется."},
+            status=409,
+        )
+
+    pipeline_runtime["state"] = "running"
+    pipeline_runtime["started_at"] = datetime.now(timezone.utc).isoformat()
+    pipeline_runtime["finished_at"] = None
+    pipeline_runtime["error_message"] = None
+
+    async def run_locked_pipeline() -> None:
+        async with pipeline_lock:
+            await _safe_run_pipeline()
+
+    asyncio.create_task(run_locked_pipeline())
     return web.json_response({"status": "pipeline_started", "message": "Сбор и обработка запущены в фоне."})
+
+
+async def handle_pipeline_status(request: web.Request) -> web.Response:
+    """Returns the current runtime state of the manually triggered pipeline."""
+    return web.json_response(pipeline_runtime)
 
 
 async def handle_run_digest(request: web.Request) -> web.Response:
@@ -1359,6 +1538,26 @@ async def handle_get_system_history(request: web.Request) -> web.Response:
     return web.json_response(runs)
 
 
+async def handle_get_filtered_tweets(request: web.Request) -> web.Response:
+    """Возвращает твиты, отфильтрованные пайплайном (is_viral=0 или IGNORED).
+    
+    Параметры запроса:
+      - limit (int, default=50): максимальное число записей
+      - start_date (str, опционально): нижняя граница inserted_at (ISO 8601)
+      - end_date (str, опционально): верхняя граница inserted_at (ISO 8601)
+    """
+    await init_db()
+    try:
+        limit = int(request.query.get("limit", 50))
+    except (ValueError, TypeError):
+        limit = 50
+    limit = max(1, min(limit, 500))
+    start_date = request.query.get("start_date") or None
+    end_date = request.query.get("end_date") or None
+    tweets = await get_filtered_tweets(limit=limit, start_date=start_date, end_date=end_date)
+    return web.json_response(tweets)
+
+
 export_jobs: Dict[str, Dict[str, Any]] = {}
 
 async def _background_export_task(job_id: str, start_date: str, end_date: str):
@@ -1481,6 +1680,8 @@ def create_app() -> web.Application:
 
     # Server-Side Twitter Login & Database Backup (Admin only)
     app.router.add_post("/api/twitter/login", handle_twitter_login)
+    app.router.add_post("/api/twitter/cookies", handle_save_twitter_cookies)
+    app.router.add_get("/api/twitter/debug-screenshot", handle_twitter_debug_screenshot)
     app.router.add_get("/api/history", handle_get_history)
 
     # --- Staging & Manual Digest Endpoints ---
@@ -1582,6 +1783,10 @@ def create_app() -> web.Application:
     app.router.add_post("/api/staging/digest/publish", handle_staging_digest_publish)
     app.router.add_post("/api/staging/digest/create", handle_create_manual_digest)
     app.router.add_get("/api/digests", handle_get_digests)
+    app.router.add_get("/api/digest-schedules", handle_get_digest_schedules)
+    app.router.add_post("/api/digest-schedules", handle_create_digest_schedule)
+    app.router.add_put("/api/digest-schedules/{id}", handle_update_digest_schedule)
+    app.router.add_delete("/api/digest-schedules/{id}", handle_delete_digest_schedule)
 
     app.router.add_get("/api/system/backup", handle_system_backup)
     app.router.add_post("/api/system/export", handle_system_export_start)
@@ -1605,9 +1810,11 @@ def create_app() -> web.Application:
     app.router.add_get("/api/settings", handle_get_settings)
     app.router.add_post("/api/settings", handle_update_settings)
     app.router.add_post("/api/pipeline/run", handle_run_pipeline)
+    app.router.add_get("/api/pipeline/status", handle_pipeline_status)
     app.router.add_post("/api/digest/run", handle_run_digest)
     app.router.add_get("/api/system/health", handle_get_system_health)
     app.router.add_get("/api/system/history", handle_get_system_history)
+    app.router.add_get("/api/system/filtered_tweets", handle_get_filtered_tweets)
 
     if STATIC_DIR.exists():
         app.router.add_static("/static", path=STATIC_DIR, name="static")
@@ -1622,7 +1829,7 @@ async def start_web_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
-    print(f"🌐 Дашборд AI Viral Hunter запущен на http://localhost:{port} (host: {host})")
+    print(f"🌐 Дашборд Viral Hunter запущен на http://localhost:{port} (host: {host})")
 
 
 def main() -> None:

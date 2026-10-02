@@ -109,6 +109,21 @@ async def init_db() -> None:
                 updated_at TIMESTAMP NOT NULL
             );
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS digest_schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                time TEXT NOT NULL,
+                title TEXT NOT NULL,
+                max_items_per_post INTEGER NOT NULL DEFAULT 5,
+                max_posts INTEGER NOT NULL DEFAULT 1,
+                sort_order TEXT NOT NULL DEFAULT 'BY_VIRAL_SCORE',
+                interval_minutes INTEGER NOT NULL DEFAULT 5,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                last_run_date TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
         # 1. Schema migration check for existing tables (must run before creating indexes on new columns)
         async with db.execute("PRAGMA table_info(tweets)") as cursor:
             cols = [row[1] for row in await cursor.fetchall()]
@@ -140,7 +155,6 @@ async def init_db() -> None:
             "editor_prompt_template": "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\nGenerate Russian title, summary, 3 key takeaways, impact score (1-10), impact reason, and hashtags (starting with #).",
             "x_relevance_prompt": "Оцени релевантность твита для IT-специалистов. Ответь только JSON: {\"relevant\": true, \"reason\": \"...\"}",
             "x_search_queries": "min_faves:50, lang:en",
-            "scout_interval_minutes": "15",
             "max_digest_items": "10",
             "queue_sort_strategy": "BY_VIRAL_SCORE",
             "show_metric_likes": "true",
@@ -159,7 +173,85 @@ async def init_db() -> None:
                 (k, v, now_iso)
             )
 
+        async with db.execute("SELECT COUNT(*) FROM digest_schedules") as cursor:
+            schedule_count = (await cursor.fetchone())[0]
+        if schedule_count == 0:
+            async with db.execute("SELECT value FROM system_settings WHERE key = 'daily_digest_time'") as cursor:
+                legacy_row = await cursor.fetchone()
+            legacy_value = legacy_row[0] if legacy_row and legacy_row[0] else getattr(settings, "daily_digest_time", None)
+            legacy_times = str(legacy_value).split(",") if legacy_value else []
+            for raw_time in legacy_times:
+                value = raw_time.strip()
+                if value and len(value) == 5 and value[2] == ":":
+                    await db.execute(
+                        """
+                        INSERT INTO digest_schedules
+                        (time, title, max_items_per_post, max_posts, sort_order, interval_minutes)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (value, "Дайджест новостей", 5, 1, "BY_VIRAL_SCORE", 5),
+                    )
+
         await db.commit()
+
+
+async def get_digest_schedules() -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM digest_schedules ORDER BY time, id") as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+
+async def save_digest_schedule(schedule: Dict[str, Any], schedule_id: Optional[int] = None) -> int:
+    fields = (
+        schedule["time"], schedule["title"], schedule["max_items_per_post"],
+        schedule["max_posts"], schedule["sort_order"], schedule["interval_minutes"],
+        int(schedule.get("enabled", True)),
+    )
+    async with aiosqlite.connect(settings.db_path) as db:
+        if schedule_id is None:
+            cursor = await db.execute(
+                """INSERT INTO digest_schedules
+                (time, title, max_items_per_post, max_posts, sort_order, interval_minutes, enabled, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""", fields
+            )
+            result_id = cursor.lastrowid
+        else:
+            await db.execute(
+                """UPDATE digest_schedules SET time=?, title=?, max_items_per_post=?, max_posts=?,
+                sort_order=?, interval_minutes=?, enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?""",
+                (*fields, schedule_id),
+            )
+            result_id = schedule_id
+        await db.commit()
+    return int(result_id)
+
+
+async def delete_digest_schedule(schedule_id: int) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute("DELETE FROM digest_schedules WHERE id = ?", (schedule_id,))
+        await db.commit()
+
+
+async def mark_digest_schedule_run(schedule_id: int, run_date: str) -> None:
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE digest_schedules SET last_run_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
+            (run_date, schedule_id),
+        )
+        await db.commit()
+
+
+async def get_digest_schedules_due(time_value: str, run_date: str) -> List[Dict[str, Any]]:
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT * FROM digest_schedules
+            WHERE enabled = 1 AND time = ? AND (last_run_date IS NULL OR last_run_date <> ?)
+            ORDER BY id""",
+            (time_value, run_date),
+        ) as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
 
 async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filters out tweets that already exist in the database."""
@@ -452,6 +544,9 @@ async def auto_schedule_queue(
     tz_offset_minutes: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """Automatically assigns spaced scheduled_at times to all queued posts, ranked by virality/impact and skipping quiet hours."""
+    if interval_minutes is None or interval_minutes <= 0:
+        return []
+
     queued = await get_queued_posts()
     if not queued:
         return []
@@ -605,6 +700,65 @@ async def get_recent_pipeline_runs(limit: int = 10) -> List[Dict[str, Any]]:
             return [dict(r) for r in rows]
 
 
+async def get_filtered_tweets(
+    limit: int = 50,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Возвращает твиты, отфильтрованные пайплайном (is_viral=0 или status=IGNORED).
+    
+    Используется для вкладки «Отфильтрованные твиты» в дашборде, чтобы редакторы
+    могли вручную проверить пропущенные публикации (false negatives).
+    """
+    if limit is None or limit <= 0:
+        limit = 50
+    limit = min(limit, 500)
+
+    conditions = ["(is_viral = 0 OR status = 'IGNORED')"]
+    params: list = []
+
+    if start_date:
+        conditions.append("inserted_at >= ?")
+        params.append(start_date)
+    if end_date:
+        conditions.append("inserted_at <= ?")
+        params.append(end_date)
+
+    where_clause = " AND ".join(conditions)
+
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""
+            SELECT
+                tweet_id, author_handle, author_name, text_raw, tweet_url,
+                created_at, inserted_at, likes_count, reposts_count, quotes_count,
+                bookmarks_count, impressions_count, viral_score, status, is_viral,
+                media_urls
+            FROM tweets
+            WHERE {where_clause}
+            ORDER BY inserted_at DESC
+            LIMIT ?
+            """,
+            (*params, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            result = []
+            for r in rows:
+                row = dict(r)
+                # Определяем причину отклонения для отображения редактору
+                score = float(row.get("viral_score") or 0.0)
+                status_val = row.get("status", "RAW")
+                if status_val == "IGNORED":
+                    row["rejection_reason"] = "Вручную отклонён или перемещён в архив"
+                elif score < 1.0:
+                    row["rejection_reason"] = "Нет показателей виральности (viral_score = 0)"
+                else:
+                    row["rejection_reason"] = f"Низкий вирал-индекс: {score:.1f} (ниже порога)"
+                result.append(row)
+            return result
+
+
 async def create_user(username: str, password: str, role: str = "editor") -> Dict[str, Any]:
     """Creates a new user with PBKDF2 salt and hash."""
     username = username.strip()
@@ -750,6 +904,9 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
     async with aiosqlite.connect(settings.db_path) as db:
         for key, val in settings_dict.items():
             if val is None:
+                await db.execute("DELETE FROM system_settings WHERE key = ?", (key.lower(),))
+                if hasattr(settings, key.lower()):
+                    setattr(settings, key.lower(), None)
                 continue
             str_val = str(val).strip()
             # Guard: ignore masked values so secrets aren't overwritten by asterisks or ellipses
@@ -772,7 +929,20 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
             env_updates[env_key] = str_val
             attr_name = key.lower()
             if hasattr(settings, attr_name):
-                field_type = type(getattr(settings, attr_name))
+                optional_bool_keys = {"daily_digest_enabled", "quiet_hours_enabled"}
+                optional_int_keys = {
+                    "scheduler_interval_minutes",
+                    "digest_pre_sleep_minutes",
+                    "digest_block_interval_minutes",
+                    "daytime_publish_interval_minutes",
+                    "scout_interval_minutes",
+                }
+                if attr_name in optional_bool_keys:
+                    field_type = bool
+                elif attr_name in optional_int_keys:
+                    field_type = int
+                else:
+                    field_type = type(getattr(settings, attr_name))
                 try:
                     if field_type == bool:
                         setattr(settings, attr_name, str_val.lower() in ("true", "1", "yes"))
@@ -864,9 +1034,24 @@ async def load_system_settings_into_config() -> None:
                     val = row["value"]
                     if hasattr(settings, key):
                         attr_val = getattr(settings, key)
-                        field_type = type(attr_val) if attr_val is not None else str
+                        optional_bool_keys = {"daily_digest_enabled", "quiet_hours_enabled"}
+                        optional_int_keys = {
+                            "scheduler_interval_minutes",
+                            "digest_pre_sleep_minutes",
+                            "digest_block_interval_minutes",
+                            "daytime_publish_interval_minutes",
+                            "scout_interval_minutes",
+                        }
+                        if key in optional_bool_keys:
+                            field_type = bool
+                        elif key in optional_int_keys:
+                            field_type = int
+                        else:
+                            field_type = type(attr_val) if attr_val is not None else str
                         try:
-                            if field_type == bool:
+                            if val is None:
+                                setattr(settings, key, None)
+                            elif field_type == bool:
                                 setattr(settings, key, val.lower() in ("true", "1", "yes"))
                             elif field_type == int:
                                 setattr(settings, key, int(val))
@@ -878,7 +1063,7 @@ async def load_system_settings_into_config() -> None:
                             setattr(settings, key, val)
 
             # Ensure persistent cryptographically strong secret_key if default is still used
-            if settings.secret_key == "ai-viral-hunter-secret-key-change-me":
+            if settings.secret_key == "viral-hunter-secret-key-change-me":
                 async with db.execute("SELECT value FROM system_settings WHERE key = 'secret_key'") as cur:
                     row = await cur.fetchone()
                     if row and row["value"]:

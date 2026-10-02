@@ -1,13 +1,12 @@
 services:
-  ai-viral-hunter:
+  viral-hunter:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ai-viral-hunter
+    container_name: viral-hunter
     restart: unless-stopped
     env_file:
-      - path: .env
-        required: false
+      - .env
     environment:
       DB_PATH: /app/data/tweets.sqlite
       PYTHONUNBUFFERED: "1"
@@ -16,7 +15,7 @@ services:
     memswap_limit: 1g
     cpus: 1.0
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
     healthcheck:

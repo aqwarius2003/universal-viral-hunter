@@ -58,7 +58,7 @@ async def test_web_app_endpoints(tmp_path, monkeypatch):
         resp = await client.get("/")
         assert resp.status == 200
         html_text = await resp.text()
-        assert "AI Viral Hunter" in html_text
+        assert "Viral Hunter" in html_text
 
         # 2. Test GET /api/posts/queue
         resp = await client.get("/api/posts/queue")

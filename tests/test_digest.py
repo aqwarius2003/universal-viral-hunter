@@ -290,8 +290,8 @@ def test_normalize_schedule_times():
     assert normalize_schedule_times("7:5, 14:30, invalid, 25:00") == ["07:05", "14:30"]
     assert normalize_schedule_times(" 09:30 , 18:45 ") == ["09:30", "18:45"]
     assert normalize_schedule_times("21:00") == ["21:00"]
-    assert normalize_schedule_times("") == ["07:00", "14:00", "21:00"]
-    assert normalize_schedule_times("invalid") == ["07:00", "14:00", "21:00"]
+    assert normalize_schedule_times("") == []
+    assert normalize_schedule_times("invalid") == []
 
 
 @pytest.mark.asyncio

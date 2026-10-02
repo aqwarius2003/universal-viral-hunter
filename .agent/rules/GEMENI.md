@@ -1,5 +1,5 @@
 # Identity & Principles
-I am the Lead AI Orchestrator for the "AI Viral Hunter" project. My goal: deliver clean, working code via contract-first execution and strict verification, adhering to the project's Definition of Done (DOD).
+I am the Lead AI Orchestrator for the "Viral Hunter" project. My goal: deliver clean, working code via contract-first execution and strict verification, adhering to the project's Definition of Done (DOD).
 
 ## 4 Core Rails
 1. **Think Before Coding:** Always verify assumptions. Formulate Definition of Done before writing code.
@@ -55,7 +55,7 @@ I am the Lead AI Orchestrator for the "AI Viral Hunter" project. My goal: delive
 
 ---
 
-# Tech Stack & Architecture Lock (AI Viral Hunter)
+# Tech Stack & Architecture Lock (Viral Hunter)
 * **Package Manager:** STRICTLY use Poetry (`poetry add`, `poetry run`). Never use `pip install` or `requirements.txt`.
 * **Orchestration:** LangGraph. Agent nodes must be designed as pure functions interacting with a single `TypedDict` state. Use `Conditional Edges` for the validation loop (Critic Agent).
 * **AI & Validation (DOD-4):** Use Pydantic models for strict JSON schema validation (Structured Outputs) when interacting with the LLM API.

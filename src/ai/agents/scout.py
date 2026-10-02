@@ -265,6 +265,48 @@ async def server_twitter_login(
         }
     except Exception as e:
         err_msg = str(e)
+        if any(x in err_msg for x in ("366", "LoginFlow", "castle_token", "not accessible")):
+            safe_print("⚠️ HTTP-вход X.com не поддерживается (LoginFlow 366). Выполняем авторизацию через браузер (Playwright)...")
+            try:
+                from src.browser_login import playwright_twitter_login
+                pw_res = await playwright_twitter_login(
+                    auth_info_1=auth_info_1,
+                    password=password,
+                    auth_info_2=auth_info_2,
+                    code=code,
+                    proxy_url=proxy,
+                    headless=True,
+                    target_cookies_path=target_cookies_path,
+                )
+                if pw_res.get("status") in ("ok", "success"):
+                    saved_cookies = load_cookies_from_file(target_cookies_path)
+                    if "auth_token" in saved_cookies:
+                        settings.twitter_auth_token = saved_cookies["auth_token"]
+                    if "ct0" in saved_cookies:
+                        settings.twitter_ct0 = saved_cookies["ct0"]
+                    return {
+                        "status": "success",
+                        "message": "Успешная авторизация в X.com через браузер (Playwright) с IP сервера",
+                        "cookies_saved": str(target_cookies_path),
+                        "has_auth_token": bool(saved_cookies.get("auth_token")),
+                        "has_ct0": bool(saved_cookies.get("ct0")),
+                    }
+                elif pw_res.get("status") == "code_required":
+                    return {
+                        "status": "challenge_required",
+                        "message": pw_res.get("message", "X.com требует 2FA код подтверждения"),
+                    }
+                else:
+                    return {
+                        "status": "error",
+                        "message": f"Ошибка браузерной авторизации в X.com: {pw_res.get('error', 'Неизвестная ошибка')}",
+                    }
+            except Exception as pw_err:
+                return {
+                    "status": "error",
+                    "message": f"Ошибка браузерного входа (Playwright): {pw_err}",
+                }
+
         if "CONFIRMATION_CODE_REQUIRED" in err_msg or "code_callback" in err_msg or "confirmation_code" in err_msg.lower() or "challenge" in err_msg.lower():
             return {
                 "status": "challenge_required",
@@ -324,35 +366,37 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
     if not query_list:
         query_list = [raw_queries.strip() if raw_queries.strip() else "(AI OR LLM OR 'machine learning') lang:en min_faves:50 -is:retweet"]
 
+    # Проверка конфигурации (Pre-flight validation)
+    if os.environ.get("TESTING") != "true" and (not settings.ai_api_key or settings.ai_api_key.startswith("your_")):
+        error_msg = "Google Gemini API ключ не настроен или недействителен (AI_API_KEY)."
+        safe_print(f"❌ {error_msg}")
+        raise ValueError(error_msg)
+
     search_results = []
-    try:
-        client = await get_twitter_client()
-        for query in query_list:
-            try:
-                res = await client.search_tweet(query, product="Top", count=10)
-                if not res:
-                    safe_print(f"ℹ️ Scout: пустой результат для Top ({query}), пробуем Latest...")
-                    res = await client.search_tweet(query, product="Latest", count=10)
-                if res:
-                    search_results.extend(res)
-            except Exception as search_err:
-                # Handle potential transient client transaction issues by refreshing transaction
-                if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
-                    try:
-                        client.refresh_transaction()
-                        res = await client.search_tweet(query, product="Top", count=10)
-                        if not res:
-                            safe_print(f"ℹ️ Scout: пустой результат для Top (retry, {query}), пробуем Latest...")
-                            res = await client.search_tweet(query, product="Latest", count=10)
-                        if res:
-                            search_results.extend(res)
-                    except Exception as retry_err:
-                        raise retry_err
-                else:
-                    raise search_err
-    except Exception as e:
-        safe_print(f"⚠️ Ошибка сбора твитов из X: {e}. Пропускаем сбор.")
-        return {"raw_tweets": []}
+    client = await get_twitter_client()
+    for query in query_list:
+        try:
+            res = await client.search_tweet(query, product="Top", count=10)
+            if not res:
+                safe_print(f"ℹ️ Scout: пустой результат для Top ({query}), пробуем Latest...")
+                res = await client.search_tweet(query, product="Latest", count=10)
+            if res:
+                search_results.extend(res)
+        except Exception as search_err:
+            # Handle potential transient client transaction issues by refreshing transaction
+            if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
+                try:
+                    client.refresh_transaction()
+                    res = await client.search_tweet(query, product="Top", count=10)
+                    if not res:
+                        safe_print(f"ℹ️ Scout: пустой результат для Top (retry, {query}), пробуем Latest...")
+                        res = await client.search_tweet(query, product="Latest", count=10)
+                    if res:
+                        search_results.extend(res)
+                except Exception as retry_err:
+                    safe_print(f"❌ Ошибка поиска X.com после обновления транзакции: {retry_err}")
+            else:
+                safe_print(f"❌ Ошибка поиска X.com: {search_err}")
 
     if not search_results:
         safe_print("ℹ️ Scout: пустой результат поиска в X.")
@@ -419,7 +463,7 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
     # Revalidate and update metrics for recent tweets in the database
     if os.environ.get("TESTING") != "true":
         try:
-            await revalidate_recent_tweets_metrics(hours=48)
+            await revalidate_recent_tweets_metrics()
         except Exception as reval_err:
             safe_print(f"⚠️ Ошибка ревалидации метрик в scout_node: {reval_err}")
 
@@ -512,7 +556,7 @@ async def refresh_tweet_metrics(tweet_ids: List[str]) -> List[Dict[str, Any]]:
     return updated_metrics
 
 
-async def revalidate_recent_tweets_metrics(hours: int = 48) -> int:
+async def revalidate_recent_tweets_metrics(hours: Optional[int] = None) -> int:
     """
     Revalidates and updates engagement metrics and viral score for recent tweets in the database.
     Checks for metric surges in X and recalculates viral scores.
@@ -521,11 +565,13 @@ async def revalidate_recent_tweets_metrics(hours: int = 48) -> int:
         from src.db import get_recent_active_tweets, update_tweet_metrics
         from src.analytics.scorer import calculate_viral_score
 
-        recent_tweets = await get_recent_active_tweets(hours=hours)
+        refresh_hours = max(1, int(hours or getattr(settings, "metric_refresh_hours", 48)))
+        recent_tweets = await get_recent_active_tweets(hours=refresh_hours)
         if not recent_tweets:
             return 0
 
-        tweet_ids = [t["tweet_id"] for t in recent_tweets[:20]]
+        refresh_limit = max(1, int(getattr(settings, "metric_refresh_limit", 20) or 20))
+        tweet_ids = [t["tweet_id"] for t in recent_tweets[:refresh_limit]]
         updated_metrics = await refresh_tweet_metrics(tweet_ids)
         if not updated_metrics:
             return 0

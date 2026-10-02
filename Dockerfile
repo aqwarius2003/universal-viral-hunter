@@ -25,8 +25,9 @@ WORKDIR /app
 # Copy dependency files first for caching
 COPY pyproject.toml poetry.lock* /app/
 
-# Install python dependencies
-RUN poetry install --no-root --no-interaction --no-ansi
+# Install python dependencies and playwright chromium
+RUN poetry install --no-root --no-interaction --no-ansi \
+    && playwright install --with-deps chromium
 
 # Copy application source code
 COPY . /app/

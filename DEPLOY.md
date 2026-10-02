@@ -1,4 +1,4 @@
-# 🚀 Руководство по безопасному развертыванию AI Viral Hunter
+# 🚀 Руководство по безопасному развертыванию Viral Hunter
 
 Полное руководство по развертыванию в Production на Linux VPS (Ubuntu / Debian / Alma / CentOS) с поддержкой **Zero-Env холодного старта**, веб-мастера настройки, ролевого доступа (RBAC), авторизации в X.com с IP сервера и персистентного хранения данных.
 
@@ -10,8 +10,8 @@
 
 ### 1. Клонируйте репозиторий на сервер
 ```bash
-git clone <URL_ВАШЕГО_РЕПОЗИТОРИЯ> ai-viral-hunter
-cd ai-viral-hunter
+git clone <URL_ВАШЕГО_РЕПОЗИТОРИЯ> viral-hunter
+cd viral-hunter
 ```
 
 ### 2. Запустите контейнер через Docker Compose
@@ -57,7 +57,7 @@ http://IP_ВАШЕГО_СЕРВЕРА:8000
 Если вы экспортируете cookies из браузера в Грузии и передаете их на сервер в Нидерландах, защитная система X.com (Twitter) обнаруживает резкую смену геопозиции и ASN/провайдера (Geo-anomaly / Session Hijacking defense) и сбрасывает сессию (`auth_token` аннулируется).
 
 ### Решение: Авторизация прямо с VPS
-В AI Viral Hunter встроен механизм серверного входа через `twifork`:
+В Viral Hunter встроен механизм серверного входа через `twifork`:
 
 1. Перейдите во вкладку **«⚙️ Настройки»** в дашборде.
 2. В блоке **«𝕏 Вход в X.com (Twitter) прямо с сервера»**:
@@ -154,28 +154,33 @@ server {
 - `./data/tweets.sqlite` — База данных (посты, очередь, пользователи, настройки).
 - `./data/cookies.json` — Авторизованная сессия X.com.
 
-### Обновление Google Cloud VM из Windows
+### Обновление любого Linux VPS сервера по IP из Windows PowerShell
 
-После изменения кода в рабочем каталоге `D:\ai-viral-hunter` запустите в PowerShell:
+После изменения кода в рабочем каталоге запустите в PowerShell:
 
 ```powershell
-.\deploy_to_cloud.ps1
+# Деплой по IP-адресу (попросит пароль или использует SSH-ключ):
+.\deploy_to_server.ps1 123.45.67.89
+
+# Или с указанием пользователя (если не root):
+.\deploy_to_server.ps1 123.45.67.89 -User ubuntu
+```
+
+Или универсальный скрипт `deploy_to_cloud.ps1`:
+
+```powershell
+.\deploy_to_cloud.ps1 123.45.67.89
 ```
 
 Скрипт автоматически:
-1. Создаст архив проекта без `.env` и `data`.
-2. Сохранит текущий каталог `data` на VM в `data/backups/`.
-3. Загрузит новый код через `gcloud compute scp`.
-4. Пересоберет и перезапустит `docker-compose.cloud.yml`.
-5. Покажет состояние контейнера.
+1. Создаст архив проекта без локальной БД и `.env`.
+2. Сделает бэкап папки `data` на сервере в `data/backups/`.
+3. Загрузит архив на ваш VPS по SSH/SCP.
+4. Пересоберет Docker-контейнер через `docker compose up -d --build`.
+5. Выведет текущий статус запущенных сервисов.
 
-Параметры VM можно изменить:
-
-```powershell
-.\deploy_to_cloud.ps1 -Instance ai-viral-hunter -Zone us-east1-b
-```
-
-Важно: запускать скрипт нужно из корня проекта. Файл `.env` и каталог `data` на VM не перезаписываются.
+> [!IMPORTANT]
+> База данных `./data/tweets.sqlite`, сессия X.com `./data/cookies.json` и файл `.env` на сервере **сохраняются и не перезаписываются**.
 
 Для обновления проекта до последней версии выполните:
 ```bash
@@ -188,11 +193,11 @@ docker compose up -d --build
 ### Проверка после обновления
 
 ```powershell
-gcloud compute ssh ai-viral-hunter --zone=us-east1-b --command="cd ~/ai-viral-hunter; sudo docker compose -f docker-compose.cloud.yml ps"
+gcloud compute ssh viral-hunter --zone=us-east1-b --command="cd ~/viral-hunter; sudo docker compose -f docker-compose.cloud.yml ps"
 ```
 
 ```powershell
-gcloud compute ssh ai-viral-hunter --zone=us-east1-b --command="cd ~/ai-viral-hunter; sudo docker compose -f docker-compose.cloud.yml logs --tail=100"
+gcloud compute ssh viral-hunter --zone=us-east1-b --command="cd ~/viral-hunter; sudo docker compose -f docker-compose.cloud.yml logs --tail=100"
 ```
 
 ### Восстановление данных
@@ -200,13 +205,13 @@ gcloud compute ssh ai-viral-hunter --zone=us-east1-b --command="cd ~/ai-viral-hu
 На VM список резервных копий:
 
 ```bash
-ls -lh ~/ai-viral-hunter/data/backups
+ls -lh ~/viral-hunter/data/backups
 ```
 
 Для восстановления выбранной копии остановите контейнер и распакуйте архив поверх `data`:
 
 ```bash
-cd ~/ai-viral-hunter
+cd ~/viral-hunter
 sudo docker compose -f docker-compose.cloud.yml down
 tar -xzf data/backups/data-YYYYMMDD-HHMMSS.tar.gz -C data
 sudo docker compose -f docker-compose.cloud.yml up -d
@@ -255,9 +260,9 @@ docker compose restart
 docker compose down
 
 # Ручной запуск тестового сбора твитов внутри контейнера
-docker compose exec ai-viral-hunter python -m src.main
+docker compose exec viral-hunter python -m src.main
 
 # Ручная отправка дайджеста
-docker compose exec ai-viral-hunter python -m src.digest
+docker compose exec viral-hunter python -m src.digest
 ```
 

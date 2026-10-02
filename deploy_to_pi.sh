@@ -3,7 +3,7 @@
 
 PI_USER="vtt"
 PI_HOST="192.168.10.43" # IP-адрес вашей Raspberry Pi
-PROJECT_DIR="/home/$PI_USER/ai-viral-hunter"
+PROJECT_DIR="/home/$PI_USER/viral-hunter"
 
 echo "🚀 Начинаем деплой на Raspberry Pi ($PI_USER@$PI_HOST)..."
 echo "ℹ️  (Вас попросят ввести пароль для копирования файлов и для запуска Docker)"
@@ -17,6 +17,9 @@ tar -czf - --exclude='.git' \
            --exclude='data' \
            --exclude='.agent' \
            --exclude='.kilo' \
+           --exclude='.env' \
+           --exclude='*.sqlite' \
+           --exclude='*.sqlite3' \
            . | ssh $PI_USER@$PI_HOST "mkdir -p $PROJECT_DIR/data && tar -xzf - -C $PROJECT_DIR"
 
 # 2. Запускаем Docker Compose на Raspberry Pi

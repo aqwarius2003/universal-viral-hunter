@@ -48,6 +48,7 @@ htmlcov/
 .idea/
 .DS_Store
 Thumbs.db
+.openclaw_tmp_probe/
 
 cookies.json
 data/

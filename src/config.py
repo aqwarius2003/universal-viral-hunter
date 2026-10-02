@@ -22,29 +22,31 @@ class Settings(BaseSettings):
     cookies_path: str = "data/cookies.json"
 
     # Security & Sessions
-    secret_key: str = "ai-viral-hunter-secret-key-change-me"
+    secret_key: str = "viral-hunter-secret-key-change-me"
     auth_enabled: bool = True
 
     # Scheduler, AI Rate Limit & Publishing limits
     ai_request_delay_seconds: int = 4
-    scheduler_interval_minutes: int = 120
+    scheduler_interval_minutes: Optional[int] = None
     max_posts_per_run: int = 1
-    daily_digest_enabled: bool = True
-    daily_digest_time: str = "07:00, 14:00, 21:00"
+    daily_digest_enabled: Optional[bool] = None
+    daily_digest_time: Optional[str] = None
 
     # Quiet hours / Night sleep mode & Digest intervals
-    quiet_hours_enabled: bool = True
-    quiet_hours_start: str = "23:00"
-    quiet_hours_end: str = "07:00"
-    digest_pre_sleep_minutes: int = 30
-    digest_block_interval_minutes: int = 5
-    daytime_publish_interval_minutes: int = 10
-    app_timezone: str = "auto"
+    quiet_hours_enabled: Optional[bool] = None
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    digest_pre_sleep_minutes: Optional[int] = None
+    digest_block_interval_minutes: Optional[int] = None
+    daytime_publish_interval_minutes: Optional[int] = None
+    app_timezone: Optional[str] = None
 
     # Dynamic Parsing Settings (Zero-State/Presets)
     x_search_queries: str = "min_faves:50, lang:en"
     x_relevance_prompt: str = "Оцени релевантность твита для IT-специалистов. Ответь только JSON: {\"relevant\": true, \"reason\": \"...\"}"
-    scout_interval_minutes: int = 15
+    scout_interval_minutes: Optional[int] = None
+    metric_refresh_hours: int = 48
+    metric_refresh_limit: int = 20
     editor_system_prompt: str = "You are an expert AI news editor and technical analyst. Create a strict JSON output matching the schema. Output all JSON string values strictly in Russian. All hashtags must strictly start with '#' (e.g. #ИИ #Нейросети #Кибербезопасность). No emojis in title or takeaways. No conversational filler."
     editor_prompt_template: str = "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\nGenerate Russian title, summary, 3 key takeaways, impact score (1-10), impact reason, and hashtags (starting with #)."
     max_digest_items: int = 10
@@ -109,6 +111,15 @@ def get_app_timezone(tz_offset_minutes: Optional[int] = None) -> Any:
     if app_tz:
         tz_name = str(app_tz).strip()
         if tz_name.lower() not in ("auto", "local", ""):
+            import re
+            offset_match = re.fullmatch(r"(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?", tz_name, re.IGNORECASE)
+            if offset_match:
+                hours = int(offset_match.group(2))
+                minutes = int(offset_match.group(3) or 0)
+                if hours <= 14 and minutes < 60 and not (hours == 14 and minutes > 0):
+                    total_minutes = hours * 60 + minutes
+                    sign = 1 if offset_match.group(1) == "+" else -1
+                    return timezone(sign * timedelta(minutes=total_minutes))
             try:
                 import zoneinfo
                 return zoneinfo.ZoneInfo(tz_name)
@@ -203,4 +214,4 @@ def adjust_for_quiet_hours(
         if start_minutes <= current_minutes < end_minutes:
             return dt.replace(hour=eh, minute=em, second=0, microsecond=0)
 
-    return dt
+    return dt

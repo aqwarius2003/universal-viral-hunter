@@ -26,7 +26,16 @@ from src.db import (
 from src.telegram.sender import send_photo_to_channel, send_post_to_channel
 from src.utils.hashtags import normalize_hashtags, enforce_hashtags_in_post
 
-client = genai.Client(api_key=settings.ai_api_key)
+client: Optional[genai.Client] = None
+
+
+def get_client() -> genai.Client:
+    global client
+    if client is None:
+        if not settings.ai_api_key or settings.ai_api_key.startswith("your_"):
+            raise RuntimeError("AI_API_KEY is not configured. Complete the setup in the web dashboard.")
+        client = genai.Client(api_key=settings.ai_api_key)
+    return client
 
 
 try:
@@ -54,6 +63,7 @@ def _parse_digest_json(raw_text: str) -> dict:
 
 async def generate_digest_with_gemini(tweets: List[Dict[str, Any]], max_retries: int = 3) -> DailyDigestSummary:
     """Uses Gemini to synthesize top tweets into a cohesive Russian daily digest with source URLs."""
+    current_client = get_client()
     system_prompt = (
         "You are the chief editor of an elite tech and AI news channel. "
         "Your task is to analyze the top viral AI tweets of the last 24 hours "
@@ -105,7 +115,7 @@ async def generate_digest_with_gemini(tweets: List[Dict[str, Any]], max_retries:
     primary_hit_429 = False
     await model_rate_limiter.acquire(primary_model, min_interval=get_model_interval())
     try:
-        response = await client.aio.models.generate_content(
+        response = await current_client.aio.models.generate_content(
             model=primary_model,
             contents=prompt,
             config=config,
@@ -133,7 +143,7 @@ async def generate_digest_with_gemini(tweets: List[Dict[str, Any]], max_retries:
         await model_rate_limiter.acquire(fallback_model, min_interval=get_model_interval())
         try:
             safe_print(f"🤖 Генерация дайджеста через резервную модель {fallback_model}...")
-            response = await client.aio.models.generate_content(
+            response = await current_client.aio.models.generate_content(
                 model=fallback_model,
                 contents=prompt,
                 config=config,
@@ -218,6 +228,8 @@ async def build_and_send_digest_chunks(
     date_display_str: str,
     chunk_size: Optional[int] = None,
     is_test: bool = False,
+    max_posts: Optional[int] = None,
+    interval_minutes: Optional[int] = None,
 ) -> List[str]:
     """Splits tweets into chunks, generates Gemini digests for each chunk, and sends them sequentially to Telegram."""
     if not tweets:
@@ -225,6 +237,8 @@ async def build_and_send_digest_chunks(
 
     actual_chunk_size = chunk_size if (chunk_size is not None and chunk_size > 0) else getattr(settings, "backlog_max_chunk_size", 6) or 6
     chunks = [tweets[i:i + actual_chunk_size] for i in range(0, len(tweets), actual_chunk_size)]
+    if max_posts is not None and max_posts > 0:
+        chunks = chunks[:max_posts]
     total_parts = len(chunks)
     published_posts = []
 
@@ -276,8 +290,10 @@ async def build_and_send_digest_chunks(
                 )
             safe_print(f"✅ Блок {idx}/{total_parts} опубликован. {len(chunk)} постов отмечены как POSTED.")
             if idx < total_parts:
-                interval_sec = settings.digest_block_interval_minutes * 60
-                safe_print(f"⏳ Пауза {settings.digest_block_interval_minutes} мин. перед отправкой следующего блока...")
+                delay_minutes = interval_minutes if interval_minutes is not None else settings.digest_block_interval_minutes
+                delay_minutes = delay_minutes or 5
+                interval_sec = delay_minutes * 60
+                safe_print(f"⏳ Пауза {delay_minutes} мин. перед отправкой следующего блока...")
                 await asyncio.sleep(interval_sec)
         else:
             safe_print(f"🧪 Тестовый режим: блок {idx}/{total_parts} сформирован, отправка пропущена.")
@@ -285,6 +301,42 @@ async def build_and_send_digest_chunks(
                 tweet["status"] = "POSTED"
 
     return published_posts
+
+
+async def run_digest_schedule_rule(rule: Dict[str, Any], is_test: bool = False) -> List[str]:
+    """Исполняет одно структурированное правило, оставляя переполнение в очереди."""
+    await init_db()
+    tweets = await get_unposted_tweets()
+    sort_order = rule.get("sort_order", "BY_VIRAL_SCORE")
+    if sort_order == "CHRONOLOGICAL_DESC":
+        tweets.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+    elif sort_order == "CHRONOLOGICAL_ASC":
+        tweets.sort(key=lambda item: item.get("created_at", ""))
+    elif sort_order == "RANDOM":
+        import random
+        random.shuffle(tweets)
+    else:
+        tweets.sort(key=lambda item: float(item.get("viral_score", 0) or 0), reverse=True)
+
+    max_items = max(1, int(rule.get("max_items_per_post", 5)))
+    max_posts = max(1, int(rule.get("max_posts", 1)))
+    capacity = max_items * max_posts
+    selected = tweets[:capacity]
+    if not selected:
+        safe_print(f"ℹ️ Для правила «{rule.get('title', 'Дайджест')}» нет постов в очереди.")
+        return []
+
+    title = str(rule.get("title") or "Дайджест новостей").strip()
+    date_display = datetime.now(get_app_timezone()).strftime("%d.%m.%Y")
+    return await build_and_send_digest_chunks(
+        tweets=selected,
+        title_prefix=title,
+        date_display_str=date_display,
+        chunk_size=max_items,
+        max_posts=max_posts,
+        interval_minutes=max(0, int(rule.get("interval_minutes", 5))),
+        is_test=is_test,
+    )
 
 
 async def run_morning_digest_parts(is_test: bool = False) -> List[str]:

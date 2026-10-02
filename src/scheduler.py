@@ -15,8 +15,8 @@ if sys.platform == "win32":
         pass
 
 from src.config import settings, is_in_quiet_hours, get_app_timezone
-from src.db import is_digest_posted, init_db, load_system_settings_into_config, cleanup_expired_posts
-from src.digest import run_daily_digest, run_morning_digest_parts, run_evening_digest_parts
+from src.db import is_digest_posted, init_db, load_system_settings_into_config, cleanup_expired_posts, get_digest_schedules, get_digest_schedules_due, mark_digest_schedule_run
+from src.digest import run_daily_digest, run_morning_digest_parts, run_evening_digest_parts, run_digest_schedule_rule
 from src.ai.agents.publisher import publish_single_top_post
 from src.main import run_pipeline
 from src.web.server import start_web_server
@@ -30,7 +30,7 @@ def log_event(message: str) -> None:
 def normalize_schedule_times(times_str: Optional[str]) -> list[str]:
     """Parses and normalizes comma-separated schedule times to HH:MM format."""
     if not times_str:
-        return ["07:00", "14:00", "21:00"]
+        return []
     result = []
     for item in times_str.split(","):
         item = item.strip()
@@ -45,19 +45,21 @@ def normalize_schedule_times(times_str: Optional[str]) -> list[str]:
                     result.append(f"{h:02d}:{m:02d}")
         except ValueError:
             continue
-    return result if result else ["07:00", "14:00", "21:00"]
+    return result
 
 
 def get_evening_digest_time_str() -> str:
     """Calculates the evening digest start time (quiet_hours_start minus digest_pre_sleep_minutes)."""
-    start_str = getattr(settings, "quiet_hours_start", "23:00")
-    pre_minutes = getattr(settings, "digest_pre_sleep_minutes", 30)
+    start_str = getattr(settings, "quiet_hours_start", None)
+    pre_minutes = getattr(settings, "digest_pre_sleep_minutes", None)
+    if not start_str or not pre_minutes:
+        return ""
     try:
         sh, sm = map(int, start_str.strip().split(":"))
         dt = datetime.now(get_app_timezone()).replace(hour=sh, minute=sm, second=0, microsecond=0) - timedelta(minutes=pre_minutes)
         return dt.strftime("%H:%M")
     except Exception:
-        return "22:30"
+        return ""
 
 
 async def check_and_publish_scheduled_digests() -> int:
@@ -100,12 +102,25 @@ async def check_daily_digest_loop() -> None:
             now = datetime.now(get_app_timezone())
             today_str = now.strftime("%Y-%m-%d")
             current_time = now.strftime("%H:%M")
+            configured_rules = []
 
             if today_str != current_tracked_day:
                 executed_slots_today.clear()
                 current_tracked_day = today_str
 
-            if settings.daily_digest_enabled and getattr(settings, "backlog_digest_enabled", True):
+            if settings.is_configured():
+                configured_rules = await get_digest_schedules()
+                due_rules = await get_digest_schedules_due(current_time, today_str)
+                for rule in due_rules:
+                    await mark_digest_schedule_run(rule["id"], today_str)
+                    log_event(f"📰 Запуск дайджеста по правилу #{rule['id']}: {rule['title']}")
+                    try:
+                        await run_digest_schedule_rule(rule)
+                        log_event(f"✅ Дайджест по правилу #{rule['id']} завершен.")
+                    except Exception as err:
+                        log_event(f"⚠️ Ошибка дайджеста по правилу #{rule['id']}: {err}")
+
+            if not configured_rules and settings.daily_digest_enabled and settings.quiet_hours_end and settings.quiet_hours_start and getattr(settings, "backlog_digest_enabled", True):
                 # 1. Morning Digest at quiet_hours_end (default 07:00)
                 morning_time = settings.quiet_hours_end
                 morning_key = f"{today_str}_morning_{morning_time}"
@@ -142,19 +157,22 @@ async def daytime_publisher_loop() -> None:
     """Background loop to publish 1 top post every daytime_publish_interval_minutes during daytime."""
     while True:
         try:
-            interval = getattr(settings, "daytime_publish_interval_minutes", 10)
+            interval = getattr(settings, "daytime_publish_interval_minutes", None)
+            if not interval:
+                await asyncio.sleep(30)
+                continue
             await asyncio.sleep(interval * 60)
 
             if not settings.is_configured():
                 continue
 
-            if is_in_quiet_hours():
+            if settings.quiet_hours_enabled and settings.quiet_hours_start and settings.quiet_hours_end and is_in_quiet_hours():
                 continue
 
             # Don't publish single posts during evening digest window (e.g. 22:30 - 23:00)
             evening_time = get_evening_digest_time_str()
             current_time = datetime.now(get_app_timezone()).strftime("%H:%M")
-            if current_time >= evening_time and current_time < settings.quiet_hours_start:
+            if evening_time and settings.quiet_hours_start and current_time >= evening_time and current_time < settings.quiet_hours_start:
                 continue
 
             # Pick and publish #1 top post from queue
@@ -219,13 +237,15 @@ async def system_maintenance_loop() -> None:
 
 
 async def run_scheduler(interval_minutes: int, run_immediately: bool = True, enable_dashboard: bool = True) -> None:
-    """Runs the AI Viral Hunter pipeline periodically every interval_minutes minutes."""
-    log_event("🚀 AI Viral Hunter Scheduler запущен!")
-    log_event(f"⏱️ Интервал проверки Scout: {interval_minutes} мин. ({interval_minutes / 60:.1f} ч.)")
-    log_event(f"⏱️ Интервал дневных публикаций: {settings.daytime_publish_interval_minutes} мин.")
-    if settings.daily_digest_enabled:
+    """Runs the Viral Hunter pipeline periodically every interval_minutes minutes."""
+    log_event("🚀 Viral Hunter Scheduler запущен!")
+    if interval_minutes:
+        log_event(f"⏱️ Интервал проверки Scout: {interval_minutes} мин. ({interval_minutes / 60:.1f} ч.)")
+    if settings.daytime_publish_interval_minutes:
+        log_event(f"⏱️ Интервал дневных публикаций: {settings.daytime_publish_interval_minutes} мин.")
+    if settings.daily_digest_enabled and settings.quiet_hours_end:
         log_event(f"📰 Утренний дайджест: {settings.quiet_hours_end} | Вечерний дайджест: {get_evening_digest_time_str()}")
-    if settings.quiet_hours_enabled:
+    if settings.quiet_hours_enabled and settings.quiet_hours_start and settings.quiet_hours_end:
         log_event(f"🌙 Режим сна (тихие часы) включен: с {settings.quiet_hours_start} до {settings.quiet_hours_end}")
 
     await init_db()
@@ -253,7 +273,7 @@ async def run_scheduler(interval_minutes: int, run_immediately: bool = True, ena
                     await asyncio.sleep(20)
                     continue
 
-                if not is_first_run or run_immediately:
+                if interval_minutes and (not is_first_run or run_immediately):
                     if is_in_quiet_hours():
                         log_event(f"🌙 Сейчас период тихих часов ({settings.quiet_hours_start} - {settings.quiet_hours_end}). Посты будут сохранены в очередь без публикации.")
                     log_event("▶️ Запуск итерации сбора и обработки постов (Scout)...")
@@ -268,10 +288,12 @@ async def run_scheduler(interval_minutes: int, run_immediately: bool = True, ena
 
                 is_first_run = False
 
-                next_run = datetime.now(get_app_timezone()) + timedelta(minutes=interval_minutes)
-                log_event(f"💤 Ожидание следующего сбора Scout в {next_run.strftime('%H:%M:%S')} (через {interval_minutes} мин.)...\n")
-
-                await asyncio.sleep(interval_minutes * 60)
+                if interval_minutes:
+                    next_run = datetime.now(get_app_timezone()) + timedelta(minutes=interval_minutes)
+                    log_event(f"💤 Ожидание следующего сбора Scout в {next_run.strftime('%H:%M:%S')} (через {interval_minutes} мин.)...\n")
+                    await asyncio.sleep(interval_minutes * 60)
+                else:
+                    await asyncio.sleep(30)
 
             except asyncio.CancelledError:
                 log_event("🛑 Получен сигнал остановки. Завершение работы планировщика...")
@@ -304,7 +326,7 @@ async def run_scheduler(interval_minutes: int, run_immediately: bool = True, ena
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Периодический планировщик для AI Viral Hunter."
+        description="Периодический планировщик для Viral Hunter."
     )
     parser.add_argument(
         "--minutes",
@@ -353,7 +375,7 @@ def main() -> None:
     else:
         interval_minutes = settings.scheduler_interval_minutes
 
-    if interval_minutes <= 0:
+    if interval_minutes is not None and interval_minutes <= 0:
         print("❌ Ошибка: интервал должен быть больше 0 минут.")
         sys.exit(1)
 

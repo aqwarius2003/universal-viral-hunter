@@ -1,10 +1,12 @@
 import sqlite3
 import pandas as pd
 
+from src.config import settings
+
 def check_db():
     print("Checking tweets.sqlite...")
     try:
-        conn = sqlite3.connect("d:/ai-viral-hunter/tweets.sqlite")
+        conn = sqlite3.connect(settings.db_path)
         df = pd.read_sql_query("SELECT * FROM sqlite_master WHERE type='table'", conn)
         print("Tables in tweets.sqlite:", df["name"].tolist())
         conn.close()
@@ -13,7 +15,7 @@ def check_db():
 
     print("\nChecking viral_hunter.db...")
     try:
-        conn = sqlite3.connect("d:/ai-viral-hunter/viral_hunter.db")
+        conn = sqlite3.connect("d:/viral-hunter/viral_hunter.db")
         df = pd.read_sql_query("SELECT * FROM sqlite_master WHERE type='table'", conn)
         print("Tables in viral_hunter.db:", df["name"].tolist())
         
