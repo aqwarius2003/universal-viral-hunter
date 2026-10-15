@@ -448,6 +448,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
             f"rm -f ~/viral-hunter-deploy.tar.gz; "
             f"cd {remote_dir}; "
             f"touch .env; "
+            f"if [ -f src/sanitize_env.py ]; then python3 src/sanitize_env.py .env || true; fi; "
             f"if ! docker compose version >/dev/null 2>&1; then "
             f"  echo 'Обновление Docker Compose до v2...'; "
             f"  apt-get update -y && apt-get install -y docker-compose-plugin 2>/dev/null || true; "

@@ -894,8 +894,13 @@ def update_env_file(key_values: Dict[str, Any], env_path: Optional[str] = None) 
         except Exception:
             pass
 
+    skip_keys = {"EDITOR_SYSTEM_PROMPT", "EDITOR_PROMPT_TEMPLATE", "X_RELEVANCE_PROMPT"}
     if not env_p.is_file():
-        lines = [f"{k}={v}\n" for k, v in key_values.items() if v is not None and not is_secret_placeholder_or_empty(k, v)]
+        lines = [
+            f'{k}="{str(v).replace(chr(34), chr(92) + chr(34)).replace(chr(13), "").replace(chr(10), chr(92) + "n")}"\n'
+            for k, v in key_values.items()
+            if v is not None and k not in skip_keys and not is_secret_placeholder_or_empty(k, v)
+        ]
         with open(env_p, "w", encoding="utf-8") as f:
             f.writelines(lines)
         return
@@ -904,13 +909,14 @@ def update_env_file(key_values: Dict[str, Any], env_path: Optional[str] = None) 
         content = f.read()
 
     for k, v in key_values.items():
-        if v is None or is_secret_placeholder_or_empty(k, v):
+        if v is None or k in skip_keys or is_secret_placeholder_or_empty(k, v):
             continue
+        clean_v = str(v).replace('"', '\\"').replace('\r', '').replace('\n', '\\n')
         pattern = re.compile(rf"^{k}=.*$", re.MULTILINE)
         if pattern.search(content):
-            content = pattern.sub(f"{k}={v}", content)
+            content = pattern.sub(f'{k}="{clean_v}"', content)
         else:
-            content += f"\n{k}={v}"
+            content += f'\n{k}="{clean_v}"'
 
     with open(env_p, "w", encoding="utf-8") as f:
         f.write(content)

@@ -1018,7 +1018,8 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                 (key.lower(), str_val, now_iso)
             )
             env_key = key.upper()
-            env_updates[env_key] = str_val
+            if key.lower() not in {"editor_system_prompt", "editor_prompt_template", "x_relevance_prompt"}:
+                env_updates[env_key] = str_val
             attr_name = key.lower()
             if hasattr(settings, attr_name):
                 optional_bool_keys = {"daily_digest_enabled", "quiet_hours_enabled"}
@@ -1052,6 +1053,7 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
     try:
         from pathlib import Path
         import sys
+        import re
 
         target_env = env_path or os.environ.get("ENV_FILE_PATH") or getattr(settings, "env_file_path", ".env")
         is_testing = bool(
@@ -1080,13 +1082,26 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
 
         env_lines = []
         existing_keys = set()
+        skip_keys_upper = {"EDITOR_SYSTEM_PROMPT", "EDITOR_PROMPT_TEMPLATE", "X_RELEVANCE_PROMPT"}
+        valid_key_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
         if os.path.exists(target_env):
             with open(target_env, "r", encoding="utf-8") as f:
                 for line in f:
                     stripped = line.strip()
-                    if stripped and not stripped.startswith("#") and "=" in stripped:
+                    if not stripped or stripped.startswith("#"):
+                        env_lines.append(line)
+                        continue
+
+                    if "=" in stripped:
                         k, existing_val = stripped.split("=", 1)
                         k = k.strip()
+                        if k in skip_keys_upper:
+                            continue  # Prompts are managed in SQLite table system_settings
+                        if not valid_key_re.match(k):
+                            env_lines.append(f"# [invalid] {line}")
+                            continue
+
                         existing_val = existing_val.strip().strip('"').strip("'")
                         if k in env_updates:
                             new_val = env_updates[k]
@@ -1094,19 +1109,20 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                             if k.lower() in secret_field_names and existing_val and not is_secret_placeholder_or_empty(k, existing_val) and is_secret_placeholder_or_empty(k, new_val):
                                 env_lines.append(line)
                             else:
-                                val_to_write = new_val.replace('"', '\\"')
+                                val_to_write = new_val.replace('"', '\\"').replace('\r', '').replace('\n', '\\n')
                                 env_lines.append(f'{k}="{val_to_write}"\n')
                             existing_keys.add(k)
                         else:
                             env_lines.append(line)
                     else:
-                        env_lines.append(line)
+                        # Orphan line without '=' - comment it out so Docker Compose won't fail
+                        env_lines.append(f"# [orphan] {line}")
 
         for k, v in env_updates.items():
-            if k not in existing_keys:
+            if k not in existing_keys and k not in skip_keys_upper:
                 if k.lower() in secret_field_names and is_secret_placeholder_or_empty(k, v):
                     continue
-                val_to_write = v.replace('"', '\\"')
+                val_to_write = v.replace('"', '\\"').replace('\r', '').replace('\n', '\\n')
                 env_lines.append(f'{k}="{val_to_write}"\n')
 
         with open(target_env, "w", encoding="utf-8") as f:
