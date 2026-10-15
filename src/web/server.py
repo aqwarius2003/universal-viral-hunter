@@ -63,6 +63,7 @@ from src.db import (
 from src.digest import run_daily_digest
 from src.main import run_pipeline
 from src.telegram.sender import send_photo_to_channel, send_post_to_channel
+from src.telegram.moderation_bot import start_moderation_bot, stop_moderation_bot
 from src.ai.agents.scout import (
     get_twitter_client,
     load_cookies_from_file,
@@ -810,6 +811,11 @@ async def handle_get_settings(request: web.Request) -> web.Response:
         "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
         "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
         "app_timezone": getattr(settings, "app_timezone", None),
+        "video_ttl_days": getattr(settings, "video_ttl_days", 2),
+        "video_max_quality": getattr(settings, "video_max_quality", 720),
+        "video_max_size_mb": getattr(settings, "video_max_size_mb", 50),
+        "telegram_admin_id": getattr(settings, "telegram_admin_id", ""),
+        "approval_required": str(getattr(settings, "approval_required", "false")).lower() == "true",
     })
 
 
@@ -1051,9 +1057,18 @@ async def handle_update_settings(request: web.Request) -> web.Response:
     if "backlog_max_chunk_size" in data:
         db_updates["backlog_max_chunk_size"] = max(1, int(data["backlog_max_chunk_size"]))
 
-    for bool_setting in ["show_metric_likes", "show_metric_reposts", "show_metric_views", "show_metric_impact", "show_metric_author", "show_metric_hashtags", "show_metric_source_btn"]:
+    for bool_setting in ["show_metric_likes", "show_metric_reposts", "show_metric_views", "show_metric_impact", "show_metric_author", "show_metric_hashtags", "show_metric_source_btn", "approval_required"]:
         if bool_setting in data:
-            db_updates[bool_setting] = bool(data[bool_setting])
+            db_updates[bool_setting] = str(data[bool_setting]).lower() == "true"
+
+    if "video_ttl_days" in data:
+        db_updates["video_ttl_days"] = int(data["video_ttl_days"])
+    if "video_max_quality" in data:
+        db_updates["video_max_quality"] = int(data["video_max_quality"])
+    if "video_max_size_mb" in data:
+        db_updates["video_max_size_mb"] = int(data["video_max_size_mb"])
+    if "telegram_admin_id" in data:
+        db_updates["telegram_admin_id"] = str(data["telegram_admin_id"]).strip()
 
     if db_updates:
         await init_db()
@@ -1657,6 +1672,30 @@ async def handle_system_history_delete(request: web.Request) -> web.Response:
     return web.json_response({"status": "success", "deleted": deleted_count})
 
 
+async def handle_get_topics(request: web.Request) -> web.Response:
+    from src.db import get_topics
+    topics = await get_topics()
+    return web.json_response(topics)
+
+async def handle_create_topic(request: web.Request) -> web.Response:
+    from src.db import create_topic
+    data = await request.json()
+    new_id = await create_topic(data)
+    return web.json_response({"id": new_id, "status": "success"})
+
+async def handle_update_topic(request: web.Request) -> web.Response:
+    from src.db import update_topic
+    topic_id = int(request.match_info['id'])
+    data = await request.json()
+    await update_topic(topic_id, data)
+    return web.json_response({"status": "success"})
+
+async def handle_delete_topic(request: web.Request) -> web.Response:
+    from src.db import delete_topic
+    topic_id = int(request.match_info['id'])
+    await delete_topic(topic_id)
+    return web.json_response({"status": "success"})
+
 def create_app() -> web.Application:
     """Creates and configures the web application with authentication middleware."""
     app = web.Application(middlewares=[auth_middleware])
@@ -1816,8 +1855,18 @@ def create_app() -> web.Application:
     app.router.add_get("/api/system/history", handle_get_system_history)
     app.router.add_get("/api/system/filtered_tweets", handle_get_filtered_tweets)
 
+    app.router.add_get("/api/topics", handle_get_topics)
+    app.router.add_post("/api/topics", handle_create_topic)
+    app.router.add_put("/api/topics/{id}", handle_update_topic)
+    app.router.add_delete("/api/topics/{id}", handle_delete_topic)
+
     if STATIC_DIR.exists():
         app.router.add_static("/static", path=STATIC_DIR, name="static")
+
+    video_dir = Path("data/video-temp")
+    if video_dir.exists() or not video_dir.exists():
+        video_dir.mkdir(parents=True, exist_ok=True)
+        app.router.add_static("/videos", path=video_dir, name="videos")
 
     return app
 
@@ -1829,6 +1878,10 @@ async def start_web_server(host: str = "0.0.0.0", port: int = 8000) -> None:
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
+    try:
+        await start_moderation_bot()
+    except Exception as e:
+        print(f"⚠️ Не удалось запустить Telegram-бота модерации: {e}")
     print(f"🌐 Дашборд Viral Hunter запущен на http://localhost:{port} (host: {host})")
 
 

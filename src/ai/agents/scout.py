@@ -29,7 +29,8 @@ except ImportError:
 
 from src.ai.agents.state import AgentState
 from src.config import settings
-from src.db import filter_new_tweets, save_raw_tweets
+from src.db import filter_new_tweets, save_raw_tweets, get_active_topics
+from src.utils.video_manager import download_video, select_best_variant, get_max_quality
 
 
 def safe_print(message: str) -> None:
@@ -138,6 +139,61 @@ def extract_media_urls(tweet: Any) -> List[str]:
                 if url and isinstance(url, str) and url.startswith("http"):
                     media_urls.append(url)
     return media_urls
+
+def extract_video_info(tweet: Any) -> Optional[Dict[str, Any]]:
+    """Extracts video metadata from a tweet."""
+    media_list = (
+        getattr(tweet, "extended_entities", {}).get("media", [])
+        if isinstance(getattr(tweet, "extended_entities", None), dict)
+        else (
+            getattr(tweet, "media", [])
+            if not isinstance(tweet, dict)
+            else tweet.get("extended_entities", {}).get("media", []) or tweet.get("media", [])
+        )
+    )
+    if not media_list:
+        return None
+
+    for item in media_list:
+        if isinstance(item, dict):
+            media_type = item.get("type", "")
+            if media_type in ("video", "animated_gif"):
+                video_info = item.get("video_info", {})
+                variants = video_info.get("variants", [])
+                if variants:
+                    thumbnail = item.get("media_url_https") or item.get("media_url")
+                    return {
+                        "type": media_type,
+                        "variants": variants,
+                        "thumbnail": thumbnail,
+                        "duration": video_info.get("duration_millis", 0)
+                    }
+        else:
+            media_type = getattr(item, "type", "")
+            if media_type in ("video", "animated_gif"):
+                video_info = getattr(item, "video_info", {})
+                if not isinstance(video_info, dict):
+                    video_info = getattr(video_info, "__dict__", {}) if video_info else {}
+                variants = video_info.get("variants", [])
+                
+                # Check for item.video_info.variants if video_info is an object
+                if not variants and hasattr(item, 'video_info'):
+                    try:
+                        variants = getattr(item.video_info, "variants", [])
+                        # Sometimes variants are objects, we need them as dicts
+                        variants = [v.__dict__ if not isinstance(v, dict) else v for v in variants]
+                    except:
+                        pass
+                        
+                if variants:
+                    thumbnail = getattr(item, "media_url_https", None) or getattr(item, "media_url", None)
+                    return {
+                        "type": media_type,
+                        "variants": variants,
+                        "thumbnail": thumbnail,
+                        "duration": video_info.get("duration_millis", 0)
+                    }
+    return None
 
 
 def load_cookies_from_file(file_path: Path) -> Dict[str, str]:
@@ -360,107 +416,131 @@ async def check_tweet_relevance(text: str, relevance_prompt: Optional[str] = Non
 
 
 async def scout_node(state: AgentState) -> Dict[str, Any]:
-    """Scout Agent: Collects live viral AI tweets from X.com using session cookies."""
-    raw_queries = getattr(settings, "x_search_queries", "") or ""
-    query_list = [q.strip() for q in raw_queries.splitlines() if q.strip()]
-    if not query_list:
-        query_list = [raw_queries.strip() if raw_queries.strip() else "(AI OR LLM OR 'machine learning') lang:en min_faves:50 -is:retweet"]
-
-    # Проверка конфигурации (Pre-flight validation)
+    """Scout Agent: Collects live viral AI tweets from X.com using session cookies for active topics."""
+    
+    # Pre-flight validation
     if os.environ.get("TESTING") != "true" and (not settings.ai_api_key or settings.ai_api_key.startswith("your_")):
         error_msg = "Google Gemini API ключ не настроен или недействителен (AI_API_KEY)."
         safe_print(f"❌ {error_msg}")
         raise ValueError(error_msg)
 
-    search_results = []
+    active_topics = await get_active_topics()
+    
+    # Fallback if no topics exist (backward compatibility)
+    if not active_topics:
+        raw_queries = getattr(settings, "x_search_queries", "") or ""
+        qlist = [q.strip() for q in raw_queries.splitlines() if q.strip()]
+        if not qlist:
+            qlist = ["(AI OR LLM OR 'machine learning') lang:en min_faves:50 -is:retweet"]
+        active_topics = [{"id": None, "name": "Default", "search_queries": "\n".join(qlist), "media_type": "any"}]
+
     client = await get_twitter_client()
-    for query in query_list:
-        try:
-            res = await client.search_tweet(query, product="Top", count=10)
-            if not res:
-                safe_print(f"ℹ️ Scout: пустой результат для Top ({query}), пробуем Latest...")
-                res = await client.search_tweet(query, product="Latest", count=10)
-            if res:
-                search_results.extend(res)
-        except Exception as search_err:
-            # Handle potential transient client transaction issues by refreshing transaction
-            if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
-                try:
-                    client.refresh_transaction()
-                    res = await client.search_tweet(query, product="Top", count=10)
-                    if not res:
-                        safe_print(f"ℹ️ Scout: пустой результат для Top (retry, {query}), пробуем Latest...")
-                        res = await client.search_tweet(query, product="Latest", count=10)
-                    if res:
-                        search_results.extend(res)
-                except Exception as retry_err:
-                    safe_print(f"❌ Ошибка поиска X.com после обновления транзакции: {retry_err}")
-            else:
-                safe_print(f"❌ Ошибка поиска X.com: {search_err}")
-
-    if not search_results:
-        safe_print("ℹ️ Scout: пустой результат поиска в X.")
-        return {"raw_tweets": []}
-
     fetched_tweets: List[Dict[str, Any]] = []
     seen_ids = set()
 
-    for tweet in search_results:
-        if not tweet:
-            continue
+    max_quality = get_max_quality()
 
-        tweet_id = getattr(tweet, "id", None) if not isinstance(tweet, dict) else tweet.get("id")
-        text = extract_tweet_text(tweet)
-        if not tweet_id or not text:
-            continue
+    for topic in active_topics:
+        topic_id = topic.get("id")
+        topic_name = topic.get("name")
+        media_type = topic.get("media_type", "any")
+        
+        raw_queries = topic.get("search_queries", "")
+        query_list = [q.strip() for q in raw_queries.splitlines() if q.strip()]
+        
+        for base_query in query_list:
+            # Append media filters based on topic configuration
+            query = base_query
+            if media_type == "video":
+                query += " filter:videos"
+            elif media_type == "photo":
+                query += " filter:images"
+            elif media_type == "photo_video":
+                query += " (filter:images OR filter:videos)"
 
-        tweet_id_str = str(tweet_id)
-        if tweet_id_str in seen_ids:
-            continue
-        seen_ids.add(tweet_id_str)
+            safe_print(f"🔍 Scout: Поиск по топику '{topic_name}' -> {query}")
+            
+            search_results = []
+            try:
+                res = await client.search_tweet(query, product="Top", count=10)
+                if not res:
+                    res = await client.search_tweet(query, product="Latest", count=10)
+                if res:
+                    search_results.extend(res)
+            except Exception as search_err:
+                if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
+                    try:
+                        client.refresh_transaction()
+                        res = await client.search_tweet(query, product="Top", count=10)
+                        if not res:
+                            res = await client.search_tweet(query, product="Latest", count=10)
+                        if res:
+                            search_results.extend(res)
+                    except Exception as retry_err:
+                        safe_print(f"❌ Ошибка поиска X.com: {retry_err}")
+                else:
+                    safe_print(f"❌ Ошибка поиска X.com: {search_err}")
 
-        user = getattr(tweet, "user", None) if not isinstance(tweet, dict) else tweet.get("user")
-        screen_name = getattr(user, "screen_name", "") if user else ""
-        user_name = getattr(user, "name", "") if user else ""
-        author_handle = f"@{screen_name}" if screen_name else "@unknown"
-        author_name = user_name or screen_name or "Unknown"
-        tweet_url = (
-            f"https://x.com/{screen_name}/status/{tweet_id}"
-            if screen_name
-            else f"https://x.com/i/status/{tweet_id}"
-        )
+            for tweet in search_results:
+                if not tweet:
+                    continue
 
-        created_at = parse_tweet_created_at(tweet)
+                tweet_id = getattr(tweet, "id", None) if not isinstance(tweet, dict) else tweet.get("id")
+                text = extract_tweet_text(tweet)
+                if not tweet_id or not text:
+                    continue
 
-        # X API view_count is often returned as a string (e.g., '35205953') or None
-        likes_count = safe_int(getattr(tweet, "favorite_count", 0) if not isinstance(tweet, dict) else tweet.get("favorite_count", 0))
-        reposts_count = safe_int(getattr(tweet, "retweet_count", 0) if not isinstance(tweet, dict) else tweet.get("retweet_count", 0))
-        quotes_count = safe_int(getattr(tweet, "quote_count", 0) if not isinstance(tweet, dict) else tweet.get("quote_count", 0))
-        bookmarks_count = safe_int(getattr(tweet, "bookmark_count", 0) if not isinstance(tweet, dict) else tweet.get("bookmark_count", 0))
-        impressions_count = safe_int(
-            (getattr(tweet, "view_count", None) if not isinstance(tweet, dict) else tweet.get("view_count", None))
-            or (getattr(tweet, "views_count", None) if not isinstance(tweet, dict) else tweet.get("views_count", None))
-            or 0
-        )
+                tweet_id_str = str(tweet_id)
+                if tweet_id_str in seen_ids:
+                    continue
+                seen_ids.add(tweet_id_str)
 
-        media_urls = extract_media_urls(tweet)
+                user = getattr(tweet, "user", None) if not isinstance(tweet, dict) else tweet.get("user")
+                screen_name = getattr(user, "screen_name", "") if user else ""
+                author_handle = f"@{screen_name}" if screen_name else "@unknown"
+                author_name = getattr(user, "name", "") if user else screen_name or "Unknown"
+                tweet_url = f"https://x.com/{screen_name}/status/{tweet_id}" if screen_name else f"https://x.com/i/status/{tweet_id}"
+                
+                created_at = parse_tweet_created_at(tweet)
+                
+                likes_count = safe_int(getattr(tweet, "favorite_count", 0) if not isinstance(tweet, dict) else tweet.get("favorite_count", 0))
+                reposts_count = safe_int(getattr(tweet, "retweet_count", 0) if not isinstance(tweet, dict) else tweet.get("retweet_count", 0))
+                quotes_count = safe_int(getattr(tweet, "quote_count", 0) if not isinstance(tweet, dict) else tweet.get("quote_count", 0))
+                bookmarks_count = safe_int(getattr(tweet, "bookmark_count", 0) if not isinstance(tweet, dict) else tweet.get("bookmark_count", 0))
+                impressions_count = safe_int((getattr(tweet, "view_count", None) if not isinstance(tweet, dict) else tweet.get("view_count", None)) or (getattr(tweet, "views_count", None) if not isinstance(tweet, dict) else tweet.get("views_count", None)) or 0)
 
-        fetched_tweets.append({
-            "tweet_id": tweet_id_str,
-            "author_handle": author_handle,
-            "author_name": author_name,
-            "text_raw": text,
-            "tweet_url": tweet_url,
-            "created_at": created_at,
-            "likes_count": likes_count,
-            "reposts_count": reposts_count,
-            "quotes_count": quotes_count,
-            "bookmarks_count": bookmarks_count,
-            "impressions_count": impressions_count,
-            "media_urls": media_urls,
-        })
+                media_urls = extract_media_urls(tweet)
+                video_info = extract_video_info(tweet)
+                
+                video_data = None
+                if video_info and video_info.get("variants"):
+                    best_variant = select_best_variant(video_info["variants"], max_quality)
+                    if best_variant:
+                        local_path = await download_video(tweet_id_str, best_variant)
+                        video_data = {
+                            "original_url": best_variant,
+                            "thumbnail": video_info.get("thumbnail"),
+                            "duration": video_info.get("duration"),
+                            "local_path": local_path
+                        }
 
-    # Revalidate and update metrics for recent tweets in the database
+                fetched_tweets.append({
+                    "tweet_id": tweet_id_str,
+                    "author_handle": author_handle,
+                    "author_name": author_name,
+                    "text_raw": text,
+                    "tweet_url": tweet_url,
+                    "created_at": created_at,
+                    "likes_count": likes_count,
+                    "reposts_count": reposts_count,
+                    "quotes_count": quotes_count,
+                    "bookmarks_count": bookmarks_count,
+                    "impressions_count": impressions_count,
+                    "media_urls": media_urls,
+                    "topic_id": topic_id,
+                    "video_data": video_data,
+                })
+
     if os.environ.get("TESTING") != "true":
         try:
             await revalidate_recent_tweets_metrics()
@@ -473,10 +553,11 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
     new_tweets = await filter_new_tweets(fetched_tweets)
     safe_print(f"✨ Новых постов после дедупликации: {len(new_tweets)}")
 
-    # Fast relevance verification with Gemini
     relevant_tweets = []
     if new_tweets:
         for tweet in new_tweets:
+            # We could use topic's system_prompt or relevance_prompt here if implemented, 
+            # but currently using global relevance check.
             is_rel = await check_tweet_relevance(tweet.get("text_raw", ""), settings.x_relevance_prompt)
             if is_rel:
                 relevant_tweets.append(tweet)

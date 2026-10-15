@@ -52,3 +52,10 @@ Thumbs.db
 
 cookies.json
 data/
+
+# 🚀 Deployment CLI & Keys
+.deploy.json
+*.pem
+id_rsa*
+id_ed25519*
+deploy_key*

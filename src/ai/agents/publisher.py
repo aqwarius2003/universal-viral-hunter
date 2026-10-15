@@ -3,14 +3,15 @@ import json
 from typing import Any, Dict, Optional
 from src.ai.agents.state import AgentState
 from src.config import settings, is_in_quiet_hours
-from src.db import update_tweet_status_and_score
+from src.db import update_tweet_status_and_score, get_active_topics
 from src.utils.hashtags import (
     normalize_hashtags,
     ensure_all_hashtags_have_hash,
     enforce_hashtags_in_post,
     extract_trailing_tags_from_summary,
 )
-from src.telegram.sender import send_post_to_channel, send_photo_to_channel
+from src.telegram.sender import send_post_to_channel, send_photo_to_channel, send_video_to_channel
+from src.telegram.moderation_bot import build_admin_keyboard
 
 
 def format_compact_num(val: Any) -> str:
@@ -213,6 +214,10 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
             )
         return {"ready_to_publish": []}
 
+    # Fetch active topics to get channel routing
+    active_topics = await get_active_topics()
+    topics_map = {t["id"]: t for t in active_topics}
+
     # Limit posts to max_posts_per_run
     max_posts = max(1, settings.max_posts_per_run)
     posts_to_publish = draft_posts[:max_posts]
@@ -223,26 +228,65 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
         ai_data = draft["ai_data"]
         tweet_url = tweet_data["tweet_url"]
         media_urls = tweet_data.get("media_urls", [])
+        video_data = tweet_data.get("video_data")
+
+        # Topic routing
+        topic_id = tweet_data.get("topic_id")
+        topic = topics_map.get(topic_id, {})
+        target_channel = topic.get("telegram_channel_id") or settings.telegram_channel_id
+
+        # If approval is required, route to admin and use a mock for now
+        approval_required = getattr(settings, "approval_required", False)
+        if str(approval_required).lower() == "true":
+            admin_id = getattr(settings, "telegram_admin_id", None)
+            if admin_id:
+                target_channel = admin_id
+                print(f"⚠️ Режим модерации включен. Пост направляется администратору: {target_channel}")
+
+        # Check for video
+        video_local_path = None
+        video_thumbnail = None
+        if video_data and isinstance(video_data, dict):
+            video_local_path = video_data.get("local_path")
+            video_thumbnail = video_data.get("thumbnail")
 
         # Check if a valid image index was selected
         selected_idx = ai_data.get("selected_image_index")
         photo_url = None
-        if selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
+        if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
             photo_url = media_urls[selected_idx]
 
-        # 1. Format the message (compact if photo_url is present)
-        formatted_text = format_telegram_post(tweet_data, ai_data, is_photo=bool(photo_url))
+        # 1. Format the message (compact if photo_url or video_local_path is present)
+        formatted_text = format_telegram_post(tweet_data, ai_data, is_photo=bool(photo_url) or bool(video_local_path))
 
         # 2. Send to Telegram
-        if photo_url:
-            await send_photo_to_channel(formatted_text, photo_url, tweet_url)
+        reply_markup = None
+        is_approval = str(approval_required).lower() == "true"
+        if is_approval and admin_id:
+            reply_markup = build_admin_keyboard(draft["tweet_id"], tweet_url)
+
+        if video_local_path:
+            await send_video_to_channel(
+                formatted_text, 
+                video_local_path, 
+                thumbnail_path=video_thumbnail, 
+                tweet_url=tweet_url, 
+                channel_id_override=target_channel,
+                reply_markup_override=reply_markup
+            )
+        elif photo_url:
+            await send_photo_to_channel(formatted_text, photo_url, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
         else:
-            await send_post_to_channel(formatted_text, tweet_url)
+            await send_post_to_channel(formatted_text, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
+
+        # 3. Update DB status. If moderation, mark as STAGING/PENDING, else POSTED
+        new_status = "PENDING_APPROVAL" if (is_approval and admin_id) else "POSTED"
 
         ready_to_publish.append({
             "text": formatted_text,
             "tweet_url": tweet_url,
             "photo_url": photo_url,
+            "video_local_path": video_local_path,
         })
 
         # 3. Update DB status to POSTED
@@ -250,7 +294,7 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
             tweet_id=draft["tweet_id"],
             score=tweet_data.get("viral_score", 0.0),
             is_viral=True,
-            status="POSTED",
+            status=new_status,
             impact_score=ai_data.get("impact_score", 0),
             summary_json=json.dumps(ai_data, ensure_ascii=False),
         )
@@ -325,7 +369,7 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
             tweet_id=top_draft["tweet_id"],
             score=top_draft.get("viral_score", 0.0),
             is_viral=True,
-            status="POSTED",
+            status=new_status,
             impact_score=summary_data.get("impact_score", 0),
             summary_json=json.dumps(summary_data, ensure_ascii=False),
         )

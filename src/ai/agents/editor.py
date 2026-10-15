@@ -20,7 +20,7 @@ from src.ai.agents.state import AgentState
 from src.ai.rate_limiter import model_rate_limiter, get_model_interval
 from src.ai.schema import TweetSummary, ImageSelection
 from src.config import settings
-from src.db import update_tweet_status_and_score
+from src.db import update_tweet_status_and_score, get_active_topics
 from src.utils.hashtags import normalize_hashtags
 
 logger = logging.getLogger("viral-hunter.editor")
@@ -190,6 +190,7 @@ async def call_llm(
     text: Optional[Union[str, Dict[str, Any]]] = None,
     media_urls: Optional[List[str]] = None,
     max_retries: int = 1,
+    topic: Optional[Dict[str, Any]] = None,
     **kwargs: Any,
 ) -> Optional[dict]:
     """
@@ -226,16 +227,17 @@ async def call_llm(
             )
         elif len(media_urls) == 1:
             selected_img_idx = 0
-            selected_img_reason = "Единственное прикрепленное изображение"
+            selected_img_reason = "Единственное прикрепленное изображение/видео"
 
     # Step 2: Prepare pure text prompt for TweetSummary
-    system_prompt = settings.editor_system_prompt
+    system_prompt = topic.get("system_prompt") if topic and topic.get("system_prompt") else settings.editor_system_prompt
+    prompt_template = topic.get("prompt_template") if topic and topic.get("prompt_template") else settings.editor_prompt_template
     
     author = tweet.get("author_handle", "") or tweet.get("author_name", "") or "Unknown"
     date = tweet.get("created_at", "")
     media_count = len(media_urls) if media_urls else 0
     try:
-        prompt_text = settings.editor_prompt_template.format(
+        prompt_text = prompt_template.format(
             text=text,
             author=author,
             date=date,
@@ -245,6 +247,18 @@ async def call_llm(
         prompt_text = f"Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}"
 
     contents = [prompt_text]
+    
+    # If media contains exactly one image (or thumbnail), and no selection was needed, pass it to the text model for multimodal context
+    if media_urls and len(media_urls) == 1:
+        try:
+            async with aiohttp.ClientSession() as session:
+                img_data = await download_image(session, media_urls[0])
+                if img_data:
+                    data, mime = img_data
+                    contents.append(types.Part.from_bytes(data=data, mime_type=mime))
+        except Exception as e:
+            logger.warning(f"Failed to append image to text model prompt: {e}")
+
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         response_mime_type="application/json",
@@ -359,13 +373,25 @@ async def editor_node(state: AgentState) -> Dict[str, Any]:
     processed_ids = {draft["tweet_id"] for draft in kept_drafts}
     new_drafts = []
 
+    active_topics = await get_active_topics()
+    topics_map = {t["id"]: t for t in active_topics}
+
     for idx, tweet in enumerate(viral_tweets):
         if tweet["tweet_id"] in processed_ids:
             continue
 
         print(f"🤖 Отправляю твит {tweet['tweet_id']} на анализ в Gemini ({settings.primary_model})...")
         media_urls = tweet.get("media_urls", [])
-        ai_response_dict = await call_llm(tweet.get("text_raw", ""), media_urls=media_urls)
+        
+        # If it's a video, use the thumbnail for multimodal context
+        video_data = tweet.get("video_data")
+        if video_data and isinstance(video_data, dict):
+            thumbnail = video_data.get("thumbnail")
+            if thumbnail:
+                media_urls = [thumbnail]
+
+        topic = topics_map.get(tweet.get("topic_id"))
+        ai_response_dict = await call_llm(tweet.get("text_raw", ""), media_urls=media_urls, topic=topic)
 
         if ai_response_dict is None:
             warn_msg = f"⚠️ Пропуск поста {tweet['tweet_id']} без падения скрипта (квоты 429 исчерпаны на обеих моделях)."

@@ -99,6 +99,12 @@ async def run_pipeline():
             )
         except Exception as rec_err:
             print(f"⚠️ Ошибка сохранения записи pipeline_runs: {rec_err}")
+            
+        try:
+            from src.utils.video_manager import cleanup_old_videos
+            cleanup_old_videos()
+        except Exception as cleanup_err:
+            print(f"⚠️ Ошибка очистки старых видео: {cleanup_err}")
 
 if __name__ == "__main__":
     asyncio.run(run_pipeline())

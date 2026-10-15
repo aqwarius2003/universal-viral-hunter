@@ -17,7 +17,7 @@ services:
           memory: 1G
           cpus: "1.0"
     ports:
-      - "127.0.0.1:8000:8000"
+      - "8000:8000"
     volumes:
       # Persistent storage for SQLite database, settings, and X.com cookies
       - ./data:/app/data
@@ -32,3 +32,22 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: viral-hunter-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - viral-hunter
+
+volumes:
+  caddy_data:
+  caddy_config:

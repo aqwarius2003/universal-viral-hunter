@@ -66,7 +66,7 @@ def get_friendly_telegram_error(err: Exception) -> str:
     return f"Ошибка отправки в Telegram: {err_str}"
 
 
-async def send_post_to_channel(text: str, tweet_url: Optional[str] = None) -> Optional[int]:
+async def send_post_to_channel(text: str, tweet_url: Optional[str] = None, channel_id_override: Optional[str] = None, reply_markup_override: Optional[InlineKeyboardMarkup] = None) -> Optional[int]:
     """
     Sends a formatted text message with an optional inline button to the configured Telegram channel.
     Returns the Telegram message_id if sent successfully.
@@ -75,14 +75,14 @@ async def send_post_to_channel(text: str, tweet_url: Optional[str] = None) -> Op
     if not settings.telegram_bot_token or "your_bot_token" in settings.telegram_bot_token:
         raise ValueError("Токен Telegram-бота (TELEGRAM_BOT_TOKEN) не задан. Укажите действующий токен бота в настройках.")
 
-    channel_id = normalize_channel_id(settings.telegram_channel_id)
+    channel_id = normalize_channel_id(channel_id_override or settings.telegram_channel_id)
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
-    keyboard = None
-    if tweet_url and getattr(settings, "show_metric_source_btn", True):
+    keyboard = reply_markup_override
+    if not keyboard and tweet_url and getattr(settings, "show_metric_source_btn", True):
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 Читать оригинал в X", url=tweet_url)]
@@ -104,7 +104,7 @@ async def send_post_to_channel(text: str, tweet_url: Optional[str] = None) -> Op
         await bot.session.close()
 
 
-async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[str] = None) -> Optional[int]:
+async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[str] = None, channel_id_override: Optional[str] = None, reply_markup_override: Optional[InlineKeyboardMarkup] = None) -> Optional[int]:
     """
     Sends a photo with caption to the configured Telegram channel.
     If the text exceeds Telegram's 1024-character caption limit, sends the photo
@@ -115,14 +115,14 @@ async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[s
     if not settings.telegram_bot_token or "your_bot_token" in settings.telegram_bot_token:
         raise ValueError("Токен Telegram-бота (TELEGRAM_BOT_TOKEN) не задан. Укажите действующий токен бота в настройках.")
 
-    channel_id = normalize_channel_id(settings.telegram_channel_id)
+    channel_id = normalize_channel_id(channel_id_override or settings.telegram_channel_id)
     bot = Bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
-    keyboard = None
-    if tweet_url and getattr(settings, "show_metric_source_btn", True):
+    keyboard = reply_markup_override
+    if not keyboard and tweet_url and getattr(settings, "show_metric_source_btn", True):
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="🔗 Читать оригинал в X", url=tweet_url)]
@@ -170,5 +170,63 @@ async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[s
         except Exception as text_err:
             friendly = get_friendly_telegram_error(text_err)
             raise RuntimeError(friendly) from text_err
+    finally:
+        await bot.session.close()
+
+from aiogram.types import FSInputFile
+
+async def send_video_to_channel(text: str, video_path: str, thumbnail_path: Optional[str] = None, tweet_url: Optional[str] = None, channel_id_override: Optional[str] = None, reply_markup_override: Optional[InlineKeyboardMarkup] = None) -> Optional[int]:
+    """
+    Sends a video with caption to the configured Telegram channel.
+    If the text exceeds Telegram's 1024-character caption limit, sends the video
+    and follows up with the full text message.
+    """
+    text = enforce_hashtags_in_post(text)
+    if not settings.telegram_bot_token or "your_bot_token" in settings.telegram_bot_token:
+        raise ValueError("Токен Telegram-бота (TELEGRAM_BOT_TOKEN) не задан.")
+
+    channel_id = normalize_channel_id(channel_id_override or settings.telegram_channel_id)
+    bot = Bot(
+        token=settings.telegram_bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+
+    keyboard = reply_markup_override
+    if not keyboard and tweet_url and getattr(settings, "show_metric_source_btn", True):
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🔗 Читать оригинал в X", url=tweet_url)]]
+        )
+
+    try:
+        video = FSInputFile(video_path) if not video_path.startswith("http") else URLInputFile(video_path)
+        thumb = FSInputFile(thumbnail_path) if thumbnail_path and not thumbnail_path.startswith("http") else (URLInputFile(thumbnail_path) if thumbnail_path else None)
+        
+        if len(text) <= MAX_CAPTION_LENGTH:
+            sent_msg = await bot.send_video(
+                chat_id=channel_id,
+                video=video,
+                thumbnail=thumb,
+                caption=text,
+                reply_markup=keyboard,
+                supports_streaming=True
+            )
+            return getattr(sent_msg, "message_id", None)
+        else:
+            await bot.send_video(
+                chat_id=channel_id,
+                video=video,
+                thumbnail=thumb,
+                supports_streaming=True
+            )
+            sent_msg = await bot.send_message(
+                chat_id=channel_id,
+                text=text,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+            return getattr(sent_msg, "message_id", None)
+    except Exception as e:
+        friendly = get_friendly_telegram_error(e)
+        raise RuntimeError(friendly) from e
     finally:
         await bot.session.close()

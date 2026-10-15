@@ -36,7 +36,22 @@ async def init_db() -> None:
                 queue_order INTEGER DEFAULT 0,
                 posted_at TIMESTAMP,
                 inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                digest_id INTEGER
+                digest_id INTEGER,
+                topic_id INTEGER,
+                video_data TEXT
+            );
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS topics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                search_queries TEXT NOT NULL,
+                media_type TEXT CHECK(media_type IN ('video', 'photo', 'photo_video', 'any')) DEFAULT 'any',
+                telegram_channel_id TEXT,
+                system_prompt TEXT,
+                prompt_template TEXT,
+                is_active BOOLEAN DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         """)
         await db.execute("""
@@ -138,6 +153,10 @@ async def init_db() -> None:
                     await db.execute("ALTER TABLE tweets ADD COLUMN queue_order INTEGER DEFAULT 0")
                 if "digest_id" not in cols:
                     await db.execute("ALTER TABLE tweets ADD COLUMN digest_id INTEGER")
+                if "topic_id" not in cols:
+                    await db.execute("ALTER TABLE tweets ADD COLUMN topic_id INTEGER REFERENCES topics(id)")
+                if "video_data" not in cols:
+                    await db.execute("ALTER TABLE tweets ADD COLUMN video_data TEXT")
 
         # 2. Create indexes
         await db.execute("CREATE INDEX IF NOT EXISTS idx_viral_status ON tweets(is_viral, status);")
@@ -166,6 +185,11 @@ async def init_db() -> None:
             "show_metric_source_btn": "true",
             "backlog_digest_enabled": "true",
             "backlog_max_chunk_size": "6",
+            "video_ttl_days": "2",
+            "video_max_quality": "720",
+            "video_max_size_mb": "50",
+            "telegram_admin_id": "",
+            "approval_required": "false",
         }
         for k, v in default_presets.items():
             await db.execute(
@@ -253,6 +277,66 @@ async def get_digest_schedules_due(time_value: str, run_date: str) -> List[Dict[
         ) as cursor:
             return [dict(row) for row in await cursor.fetchall()]
 
+async def get_active_topics() -> List[Dict[str, Any]]:
+    """Fetches all active topics."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM topics WHERE is_active = 1 ORDER BY id") as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+async def get_topics() -> List[Dict[str, Any]]:
+    """Fetches all topics."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM topics ORDER BY id") as cursor:
+            return [dict(row) for row in await cursor.fetchall()]
+
+async def create_topic(topic: Dict[str, Any]) -> int:
+    """Creates a new topic."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        async with db.execute(
+            """INSERT INTO topics (name, search_queries, media_type, telegram_channel_id, system_prompt, prompt_template, is_active)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                topic.get("name", "New Topic"),
+                topic.get("search_queries", ""),
+                topic.get("media_type", "any"),
+                topic.get("telegram_channel_id", ""),
+                topic.get("system_prompt", ""),
+                topic.get("prompt_template", ""),
+                topic.get("is_active", 1)
+            )
+        ) as cursor:
+            await db.commit()
+            return cursor.lastrowid
+
+async def update_topic(topic_id: int, topic: Dict[str, Any]) -> None:
+    """Updates an existing topic."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            """UPDATE topics SET 
+                name = ?, search_queries = ?, media_type = ?, telegram_channel_id = ?, 
+                system_prompt = ?, prompt_template = ?, is_active = ?
+               WHERE id = ?""",
+            (
+                topic.get("name", ""),
+                topic.get("search_queries", ""),
+                topic.get("media_type", "any"),
+                topic.get("telegram_channel_id", ""),
+                topic.get("system_prompt", ""),
+                topic.get("prompt_template", ""),
+                topic.get("is_active", 1),
+                topic_id
+            )
+        )
+        await db.commit()
+
+async def delete_topic(topic_id: int) -> None:
+    """Deletes a topic."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
+        await db.commit()
+
 async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Filters out tweets that already exist in the database."""
     if not tweets:
@@ -277,20 +361,23 @@ async def save_raw_tweets(tweets: List[Dict[str, Any]]) -> None:
     async with aiosqlite.connect(settings.db_path) as db:
         for tweet in tweets:
             media_urls_json = json.dumps(tweet.get("media_urls", []))
+            video_data_json = json.dumps(tweet.get("video_data", {})) if tweet.get("video_data") else None
             await db.execute(
                 """
                 INSERT INTO tweets (
                     tweet_id, author_handle, author_name, text_raw, tweet_url, 
                     created_at, likes_count, reposts_count, quotes_count, 
-                    bookmarks_count, impressions_count, viral_score, status, media_urls
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    bookmarks_count, impressions_count, viral_score, status, media_urls,
+                    topic_id, video_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tweet["tweet_id"], tweet["author_handle"], tweet.get("author_name", tweet["author_handle"]),
                     tweet["text_raw"], tweet["tweet_url"], tweet["created_at"],
                     tweet.get("likes_count", 0), tweet.get("reposts_count", 0),
                     tweet.get("quotes_count", 0), tweet.get("bookmarks_count", 0),
-                    tweet.get("impressions_count", 0), 0.0, 'RAW', media_urls_json
+                    tweet.get("impressions_count", 0), 0.0, 'RAW', media_urls_json,
+                    tweet.get("topic_id"), video_data_json
                 )
             )
         await db.commit()
@@ -425,6 +512,12 @@ def _deserialize_row(row_dict: Dict[str, Any]) -> Dict[str, Any]:
             d["summary_data"] = None
     else:
         d["summary_data"] = None
+
+    if isinstance(d.get("video_data"), str):
+        try:
+            d["video_data"] = json.loads(d["video_data"])
+        except Exception:
+            d["video_data"] = None
     return d
 
 
