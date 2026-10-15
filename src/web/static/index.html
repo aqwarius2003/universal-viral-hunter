@@ -2267,6 +2267,62 @@
               </div>
             </div>
 
+            <!-- Multi-Topics Management -->
+            <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                <h4 style="margin:0; font-size: 0.95rem; color: #fff;">📂 Мультитопики (Тематические ленты)</h4>
+                <button type="button" class="btn btn-sm btn-primary" onclick="openTopicModal()">+ Добавить топик</button>
+              </div>
+              <p class="form-hint" style="margin-bottom:12px;">Настройте отдельные тематики со своими поисковыми запросами, фильтром медиа (видео/фото) и персональными Telegram-каналами.</p>
+              <div id="topics-list-container" style="display:flex; flex-direction:column; gap:8px;">
+                <div style="font-size:0.85rem; color:var(--tg-text-muted);">Загрузка топиков...</div>
+              </div>
+            </div>
+
+            <!-- Video Manager Settings -->
+            <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
+              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">🎥 Настройки Video Manager</h4>
+              <p class="form-hint" style="margin-bottom:12px;">Управление скачиванием, качеством и очисткой видеороликов из X.com.</p>
+              <div class="form-row">
+                <div class="form-group">
+                  <label class="form-label" for="setting-video-ttl">Хранение видео (дней)</label>
+                  <input type="number" min="1" max="30" class="form-control" id="setting-video-ttl" name="video_ttl_days" value="2">
+                  <p class="form-hint">Через сколько дней автоматически удалять старые скачанные видео</p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="setting-video-quality">Макс. разрешение</label>
+                  <select class="form-control" id="setting-video-quality" name="video_max_quality">
+                    <option value="720">720p (HD - Рекомендуется)</option>
+                    <option value="480">480p (SD)</option>
+                    <option value="1080">1080p (Full HD)</option>
+                  </select>
+                  <p class="form-hint">Выбор качества MP4 из вариантов в X.com</p>
+                </div>
+                <div class="form-group">
+                  <label class="form-label" for="setting-video-size">Макс. размер файла (МБ)</label>
+                  <input type="number" min="5" max="50" class="form-control" id="setting-video-size" name="video_max_size_mb" value="50">
+                  <p class="form-hint">Лимит отправки файлов через Telegram Bot API — 50 МБ</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Telegram Moderation Workflow Settings -->
+            <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
+              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">🛡️ Согласование перед публикацией (Модерация)</h4>
+              <div class="form-group" style="margin-bottom: 10px;">
+                <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; color:#fff;">
+                  <input type="checkbox" id="setting-approval-required" name="approval_required">
+                  Отправлять посты на утверждение администратору перед публикацией в канал
+                </label>
+                <p class="form-hint">Если включено, бот отправляет черновик администратору в ЛС с кнопками «Опубликовать», «Отклонить» и «С комментарием».</p>
+              </div>
+              <div class="form-group" style="margin-bottom:0;">
+                <label class="form-label" for="setting-telegram-admin-id">Telegram ID администратора</label>
+                <input type="text" class="form-control" id="setting-telegram-admin-id" name="telegram_admin_id" placeholder="Например: 123456789">
+                <p class="form-hint">Ваш числовой ID в Telegram (его можно узнать у бота @userinfobot)</p>
+              </div>
+            </div>
+
             <!-- API Keys and Sensitive Config -->
             <div style="margin: 20px 0; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--tg-border);">
               <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Интеграционные ключи</h4>
@@ -2738,6 +2794,69 @@
           <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
             <button type="button" class="btn" onclick="closeTwitterCodeModal()">Отмена</button>
             <button type="submit" class="btn btn-primary" id="btn-tw-code-submit">Подтвердить</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  <!-- TOPIC CREATE / EDIT MODAL -->
+  <div class="modal-backdrop" id="topic-modal">
+    <div class="modal-box" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="topic-modal-title">Настройка топика</h3>
+        <button class="modal-close" onclick="closeTopicModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <form id="topic-form" onsubmit="handleTopicSubmit(event)">
+          <input type="hidden" id="topic-id">
+          
+          <div class="form-group">
+            <label class="form-label" for="topic-name">Название топика</label>
+            <input type="text" class="form-control" id="topic-name" required placeholder="Например: Искусственный Интеллект">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="topic-queries">Поисковые запросы (X.com)</label>
+            <textarea class="form-control" id="topic-queries" rows="3" required placeholder="AI OR LLM OR Claude OR OpenAI"></textarea>
+            <p class="form-hint">Запросы через логические операторы X (OR, AND). Фильтры медиа добавляются автоматически.</p>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="topic-media-type">Тип контента</label>
+              <select class="form-control" id="topic-media-type">
+                <option value="any">Любой (текст, фото, видео)</option>
+                <option value="video">🎬 Только видео (filter:videos)</option>
+                <option value="photo">🖼 Только фото (filter:images)</option>
+                <option value="photo_video">🎬+🖼 Видео или фото</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="topic-channel-id">Telegram-канал (переопределение)</label>
+              <input type="text" class="form-control" id="topic-channel-id" placeholder="@my_ai_channel (пусто = общий)">
+              <p class="form-hint">Если не указан, пойдет в общий канал</p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="topic-system-prompt">Кастомный системный промпт (необязательно)</label>
+            <textarea class="form-control" id="topic-system-prompt" rows="2" placeholder="Оставьте пустым для использования глобального промпта"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="topic-prompt-template">Кастомный шаблон суммаризации (необязательно)</label>
+            <textarea class="form-control" id="topic-prompt-template" rows="2" placeholder="Оставьте пустым для использования глобального шаблона"></textarea>
+          </div>
+
+          <div class="form-group" style="margin-top:10px;">
+            <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+              <input type="checkbox" id="topic-is-active" checked>
+              <strong>Топик активен для сбора постов</strong>
+            </label>
+          </div>
+
+          <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:20px;">
+            <button type="button" class="btn" onclick="closeTopicModal()">Отмена</button>
+            <button type="submit" class="btn btn-primary" id="btn-save-topic">Сохранить топик</button>
           </div>
         </form>
       </div>
@@ -3788,6 +3907,22 @@
           ? `<div class="author-line"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: -1px; margin-right: 4px;"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg><a href="${xProfileUrl}" target="_blank" rel="noopener">${authorDisplay}</a></div>`
           : `<div class="author-line"><span>${authorDisplay}</span></div>`;
 
+        let mediaHtml = '';
+        if (p.video_data && (p.video_data.local_path || p.video_data.video_url)) {
+          const filename = p.video_data.local_path ? p.video_data.local_path.split(/[/\\]/).pop() : '';
+          const vidSrc = filename ? `/videos/${filename}` : (p.video_data.video_url || '');
+          mediaHtml = `
+            <div style="position:relative; width:100%; max-height:360px; background:#000; overflow:hidden; border-radius:8px; margin-bottom:10px;">
+              <video controls preload="metadata" style="width:100%; max-height:360px; object-fit:contain;" poster="${p.video_data.thumbnail || photoUrl || ''}">
+                <source src="${vidSrc}" type="video/mp4">
+              </video>
+              <span style="position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.7); color:#fff; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;">🎬 ВИДЕО</span>
+            </div>
+          `;
+        } else if (photoUrl) {
+          mediaHtml = `<img src="${photoUrl}" alt="Post image" class="tg-post-image" onerror="this.style.display='none'">`;
+        }
+
         return `
           <div class="tg-card" data-id="${p.tweet_id}">
             <div class="tg-card-header">
@@ -3795,7 +3930,7 @@
               ${statusBadgeHtml}
             </div>
 
-            ${photoUrl ? `<img src="${photoUrl}" alt="Post image" class="tg-post-image" onerror="this.style.display='none'">` : ''}
+            ${mediaHtml}
 
             <div class="tg-post-body">
               ${authorLineHtml}
@@ -3904,13 +4039,29 @@
           ? `<div class="author-line"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: -1px; margin-right: 4px;"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg><a href="${xProfileUrl}" target="_blank" rel="noopener">${authorDisplay}</a></div>`
           : `<div class="author-line"><span>${authorDisplay}</span></div>`;
 
+        let mediaHtml = '';
+        if (p.video_data && (p.video_data.local_path || p.video_data.video_url)) {
+          const filename = p.video_data.local_path ? p.video_data.local_path.split(/[/\\]/).pop() : '';
+          const vidSrc = filename ? `/videos/${filename}` : (p.video_data.video_url || '');
+          mediaHtml = `
+            <div style="position:relative; width:100%; max-height:360px; background:#000; overflow:hidden; border-radius:8px; margin-bottom:10px;">
+              <video controls preload="metadata" style="width:100%; max-height:360px; object-fit:contain;" poster="${p.video_data.thumbnail || photoUrl || ''}">
+                <source src="${vidSrc}" type="video/mp4">
+              </video>
+              <span style="position:absolute; top:8px; left:8px; background:rgba(0,0,0,0.7); color:#fff; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600;">🎬 ВИДЕО</span>
+            </div>
+          `;
+        } else if (photoUrl) {
+          mediaHtml = `<img src="${photoUrl}" alt="Post image" class="tg-post-image" onerror="this.style.display='none'">`;
+        }
+
         return `
           <div class="tg-card">
             <div class="tg-card-header">
               <span class="status-badge status-posted">${postedStatusText}</span>
             </div>
 
-            ${photoUrl ? `<img src="${photoUrl}" alt="Post image" class="tg-post-image" onerror="this.style.display='none'">` : ''}
+            ${mediaHtml}
 
             <div class="tg-post-body">
               ${authorLineHtml}
@@ -4219,6 +4370,14 @@
         if (document.getElementById("setting-editor-sys-prompt")) document.getElementById("setting-editor-sys-prompt").value = data.editor_system_prompt || "";
         if (document.getElementById("setting-editor-template")) document.getElementById("setting-editor-template").value = data.editor_prompt_template || "";
 
+        if (document.getElementById("setting-video-ttl")) document.getElementById("setting-video-ttl").value = data.video_ttl_days ?? 2;
+        if (document.getElementById("setting-video-quality")) document.getElementById("setting-video-quality").value = data.video_max_quality ?? 720;
+        if (document.getElementById("setting-video-size")) document.getElementById("setting-video-size").value = data.video_max_size_mb ?? 50;
+        if (document.getElementById("setting-approval-required")) document.getElementById("setting-approval-required").checked = data.approval_required === true;
+        if (document.getElementById("setting-telegram-admin-id")) document.getElementById("setting-telegram-admin-id").value = data.telegram_admin_id || "";
+
+        loadTopics();
+
         if (document.getElementById("setting-gemini-key")) {
           document.getElementById("setting-gemini-key").value = data.ai_api_key || "";
         }
@@ -4308,6 +4467,12 @@
       if (document.getElementById("setting-editor-sys-prompt")) payload.editor_system_prompt = document.getElementById("setting-editor-sys-prompt").value;
       if (document.getElementById("setting-editor-template")) payload.editor_prompt_template = document.getElementById("setting-editor-template").value;
 
+      if (document.getElementById("setting-video-ttl")) payload.video_ttl_days = parseInt(document.getElementById("setting-video-ttl").value, 10);
+      if (document.getElementById("setting-video-quality")) payload.video_max_quality = parseInt(document.getElementById("setting-video-quality").value, 10);
+      if (document.getElementById("setting-video-size")) payload.video_max_size_mb = parseInt(document.getElementById("setting-video-size").value, 10);
+      if (document.getElementById("setting-approval-required")) payload.approval_required = document.getElementById("setting-approval-required").checked;
+      if (document.getElementById("setting-telegram-admin-id")) payload.telegram_admin_id = document.getElementById("setting-telegram-admin-id").value.trim();
+
       const aiKey = formData.get("ai_api_key");
       if (aiKey && !aiKey.includes("...")) {
         payload.ai_api_key = aiKey.trim();
@@ -4342,6 +4507,144 @@
           loadSettings();
         } else {
           showToast("Ошибка сохранения настроек", "error");
+        }
+      } catch (err) {
+        showToast("Ошибка: " + err.message, "error");
+      }
+    }
+
+    // TOPICS MANAGEMENT
+    let allTopicsList = [];
+
+    async function loadTopics() {
+      const container = document.getElementById("topics-list-container");
+      if (!container) return;
+      try {
+        const res = await fetch("/api/topics");
+        if (!res.ok) return;
+        allTopicsList = await res.json();
+        renderTopics(allTopicsList);
+      } catch (err) {
+        console.error("Failed to load topics:", err);
+      }
+    }
+
+    function renderTopics(topics) {
+      const container = document.getElementById("topics-list-container");
+      if (!container) return;
+      if (!topics || topics.length === 0) {
+        container.innerHTML = `
+          <div style="padding:12px; background:rgba(0,0,0,0.2); border-radius:6px; color:var(--tg-text-muted); font-size:0.85rem;">
+            Топики еще не созданы. Нажмите «+ Добавить топик» для создания целевых тематик.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = topics.map(t => {
+        const mediaLabel = {
+          'any': 'Любой контент',
+          'video': '🎬 Только видео',
+          'photo': '🖼 Только фото',
+          'photo_video': '🎬+🖼 Видео/фото'
+        }[t.media_type] || t.media_type;
+
+        return `
+          <div style="display:flex; justify-content:space-between; align-items:center; padding:10px 14px; background:rgba(0,0,0,0.25); border:1px solid var(--tg-border); border-radius:8px;">
+            <div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <strong style="font-size:0.95rem; color:#fff;">${escapeHtml(t.name)}</strong>
+                <span class="status-badge ${t.is_active ? 'status-posted' : 'status-processed'}" style="font-size:0.7rem; padding:1px 6px;">
+                  ${t.is_active ? 'Активен' : 'Отключен'}
+                </span>
+                <span style="font-size:0.75rem; background:rgba(255,255,255,0.08); padding:1px 6px; border-radius:4px; color:var(--tg-text-muted);">
+                  ${mediaLabel}
+                </span>
+              </div>
+              <div style="font-size:0.8rem; color:var(--tg-text-muted); margin-top:4px;">
+                <span style="color:#aaa;">Запросы:</span> <code>${escapeHtml(t.search_queries)}</code>
+                ${t.telegram_channel_id ? ` · <span style="color:var(--tg-primary);">Канал: ${escapeHtml(t.telegram_channel_id)}</span>` : ''}
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button type="button" class="btn btn-sm" onclick="openTopicModal(${t.id})" style="padding:3px 8px; font-size:0.78rem;">✏️ Изменить</button>
+              <button type="button" class="btn btn-sm btn-danger" onclick="deleteTopic(${t.id})" style="padding:3px 8px; font-size:0.78rem;">🗑</button>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function openTopicModal(topicId = null) {
+      document.getElementById("topic-form").reset();
+      document.getElementById("topic-id").value = "";
+      document.getElementById("topic-modal-title").textContent = "Новый топик";
+      document.getElementById("topic-is-active").checked = true;
+
+      if (topicId) {
+        const t = allTopicsList.find(x => x.id === topicId);
+        if (t) {
+          document.getElementById("topic-id").value = t.id;
+          document.getElementById("topic-modal-title").textContent = `Редактирование: ${t.name}`;
+          document.getElementById("topic-name").value = t.name || "";
+          document.getElementById("topic-queries").value = t.search_queries || "";
+          document.getElementById("topic-media-type").value = t.media_type || "any";
+          document.getElementById("topic-channel-id").value = t.telegram_channel_id || "";
+          document.getElementById("topic-system-prompt").value = t.system_prompt || "";
+          document.getElementById("topic-prompt-template").value = t.prompt_template || "";
+          document.getElementById("topic-is-active").checked = t.is_active === 1 || t.is_active === true;
+        }
+      }
+
+      document.getElementById("topic-modal").classList.add("open");
+    }
+
+    function closeTopicModal() {
+      document.getElementById("topic-modal").classList.remove("open");
+    }
+
+    async function handleTopicSubmit(e) {
+      e.preventDefault();
+      const topicId = document.getElementById("topic-id").value;
+      const data = {
+        name: document.getElementById("topic-name").value.trim(),
+        search_queries: document.getElementById("topic-queries").value.trim(),
+        media_type: document.getElementById("topic-media-type").value,
+        telegram_channel_id: document.getElementById("topic-channel-id").value.trim(),
+        system_prompt: document.getElementById("topic-system-prompt").value.trim(),
+        prompt_template: document.getElementById("topic-prompt-template").value.trim(),
+        is_active: document.getElementById("topic-is-active").checked ? 1 : 0
+      };
+
+      try {
+        const url = topicId ? `/api/topics/${topicId}` : "/api/topics";
+        const method = topicId ? "PUT" : "POST";
+        const res = await fetch(url, {
+          method,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data)
+        });
+        if (res.ok) {
+          showToast(topicId ? "Топик обновлен!" : "Топик успешно создан!", "success");
+          closeTopicModal();
+          loadTopics();
+        } else {
+          showToast("Ошибка сохранения топика", "error");
+        }
+      } catch (err) {
+        showToast("Ошибка: " + err.message, "error");
+      }
+    }
+
+    async function deleteTopic(topicId) {
+      if (!confirm("Вы уверены, что хотите удалить этот топик?")) return;
+      try {
+        const res = await fetch(`/api/topics/${topicId}`, { method: "DELETE" });
+        if (res.ok) {
+          showToast("Топик удален", "success");
+          loadTopics();
+        } else {
+          showToast("Ошибка удаления топика", "error");
         }
       } catch (err) {
         showToast("Ошибка: " + err.message, "error");
