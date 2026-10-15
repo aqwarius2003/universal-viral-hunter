@@ -236,8 +236,22 @@ async def call_llm(
             selected_img_reason = "Единственное прикрепленное изображение/видео"
 
     # Step 2: Prepare pure text prompt for TweetSummary
-    system_prompt = topic.get("system_prompt") if topic and topic.get("system_prompt") else settings.editor_system_prompt
-    prompt_template = topic.get("prompt_template") if topic and topic.get("prompt_template") else settings.editor_prompt_template
+    system_prompt = (topic.get("system_prompt") if topic and topic.get("system_prompt") else None) or settings.editor_system_prompt
+    prompt_template = (topic.get("prompt_template") if topic and topic.get("prompt_template") else None) or settings.editor_prompt_template
+
+    if not system_prompt or not system_prompt.strip():
+        system_prompt = (
+            "You are an expert news editor and media analyst. "
+            "Create a strict JSON output matching the schema. "
+            "Output all JSON string values strictly in Russian. "
+            "All hashtags must strictly start with '#' (e.g. #Новости #Видео #Происшествия). "
+            "No emojis in title or takeaways. No conversational filler."
+        )
+    if not prompt_template or not prompt_template.strip():
+        prompt_template = (
+            "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\n"
+            "Generate Russian title, summary, 3 key takeaways, impact score (1-10), impact reason, and hashtags (starting with #)."
+        )
     
     author = tweet.get("author_handle", "") or tweet.get("author_name", "") or "Unknown"
     date = tweet.get("created_at", "")

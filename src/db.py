@@ -1005,15 +1005,9 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                     setattr(settings, key.lower(), None)
                 continue
             str_val = str(val).strip()
-            # Guard: ignore masked or placeholder values for secret fields
+            # Guard: ignore masked or placeholder values for secret fields only
             if key.lower() in secret_field_names and is_secret_placeholder_or_empty(key, str_val):
                 continue
-            if is_secret_placeholder_or_empty(key, str_val):
-                # Check if an existing valid secret exists in SQLite
-                async with db.execute("SELECT value FROM system_settings WHERE key = ?", (key.lower(),)) as cur:
-                    row = await cur.fetchone()
-                    if row and row[0] and not is_secret_placeholder_or_empty(key, row[0]):
-                        continue  # Never overwrite an existing valid setting with empty/placeholder/mask
 
             await db.execute(
                 """
@@ -1097,7 +1091,7 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                         if k in env_updates:
                             new_val = env_updates[k]
                             # Guard: never overwrite existing non-empty secret with empty or template placeholder
-                            if existing_val and not is_secret_placeholder_or_empty(k, existing_val) and is_secret_placeholder_or_empty(k, new_val):
+                            if k.lower() in secret_field_names and existing_val and not is_secret_placeholder_or_empty(k, existing_val) and is_secret_placeholder_or_empty(k, new_val):
                                 env_lines.append(line)
                             else:
                                 val_to_write = new_val.replace('"', '\\"')
@@ -1109,7 +1103,9 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                         env_lines.append(line)
 
         for k, v in env_updates.items():
-            if k not in existing_keys and v and not is_secret_placeholder_or_empty(k, v):
+            if k not in existing_keys:
+                if k.lower() in secret_field_names and is_secret_placeholder_or_empty(k, v):
+                    continue
                 val_to_write = v.replace('"', '\\"')
                 env_lines.append(f'{k}="{val_to_write}"\n')
 

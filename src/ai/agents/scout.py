@@ -555,10 +555,18 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
 
     relevant_tweets = []
     if new_tweets:
+        topics_by_id = {t["id"]: t for t in active_topics if t.get("id")}
         for tweet in new_tweets:
-            # We could use topic's system_prompt or relevance_prompt here if implemented, 
-            # but currently using global relevance check.
-            is_rel = await check_tweet_relevance(tweet.get("text_raw", ""), settings.x_relevance_prompt)
+            t_id = tweet.get("topic_id")
+            topic = topics_by_id.get(t_id) if t_id else None
+            # If the tweet belongs to a custom topic (multi-stream), it is already targeted by topic search queries.
+            # Only apply global relevance check if tweet has no topic or if global relevance prompt is non-empty and there's no custom topic.
+            if not getattr(settings, "x_relevance_prompt", "") or not settings.x_relevance_prompt.strip():
+                is_rel = True
+            elif topic and topic.get("name") and topic.get("name") != "Default":
+                is_rel = True
+            else:
+                is_rel = await check_tweet_relevance(tweet.get("text_raw", ""), settings.x_relevance_prompt)
             if is_rel:
                 relevant_tweets.append(tweet)
             else:
