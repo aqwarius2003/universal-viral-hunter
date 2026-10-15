@@ -5,14 +5,14 @@ class TweetSummary(BaseModel):
     title_ru: str = Field(description="Title in Russian, max 10 words")
     summary_ru: str = Field(description="Summary in Russian, 2-3 sentences")
     takeaways: List[str] = Field(
-        description="Exactly 3 bullet points in Russian", 
-        min_length=3, 
-        max_length=3
+        default_factory=list,
+        description="Key takeaways in Russian, or empty list [] if post does not need bullet points", 
     )
-    impact_score: int = Field(ge=1, le=10, description="Score from 1 to 10")
-    impact_reason: str = Field(description="Brief reason for the score in Russian")
+    impact_score: int = Field(default=8, ge=1, le=10, description="Score from 1 to 10")
+    impact_reason: str = Field(default="", description="Brief reason for the score in Russian")
     hashtags: List[str] = Field(
-        description="3 to 5 relevant hashtags, each strictly starting with # (e.g. #AI, #Tech, #Кибербезопасность)"
+        default_factory=list,
+        description="Hashtags starting with #, or empty list [] if not needed"
     )
     selected_image_index: Optional[int] = Field(
         default=None,
