@@ -37,6 +37,12 @@ def get_client() -> genai.Client:
     return client
 
 
+def reset_client() -> None:
+    """Resets cached Gemini client so newly saved API keys take effect immediately."""
+    global client
+    client = None
+
+
 _ai_status: Dict[str, Any] = {
     "status": "pending",
     "message": "Проверка состояния...",

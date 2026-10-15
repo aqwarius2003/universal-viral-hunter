@@ -979,7 +979,8 @@ def is_secret_placeholder_or_empty(key: str, val: Any) -> bool:
         return True
     if any(m in s for m in ("*", "...", "•••")):
         return True
-    if s.startswith("your_") or s.startswith("your-") or "change-me" in s.lower():
+    s_low = s.lower()
+    if s_low.startswith("your_") or s_low.startswith("your-") or "change-me" in s_low or "your_gemini" in s_low or "your_api" in s_low:
         return True
     return False
 
@@ -994,6 +995,8 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
     now_iso = datetime.now(timezone.utc).isoformat()
     env_updates: Dict[str, str] = {}
 
+    secret_field_names = {"ai_api_key", "telegram_bot_token", "twitter_password", "secret_key"}
+
     async with aiosqlite.connect(settings.db_path) as db:
         for key, val in settings_dict.items():
             if val is None:
@@ -1002,7 +1005,9 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                     setattr(settings, key.lower(), None)
                 continue
             str_val = str(val).strip()
-            # Guard: ignore masked values so secrets aren't overwritten by asterisks or ellipses
+            # Guard: ignore masked or placeholder values for secret fields
+            if key.lower() in secret_field_names and is_secret_placeholder_or_empty(key, str_val):
+                continue
             if is_secret_placeholder_or_empty(key, str_val):
                 # Check if an existing valid secret exists in SQLite
                 async with db.execute("SELECT value FROM system_settings WHERE key = ?", (key.lower(),)) as cur:
@@ -1125,6 +1130,8 @@ async def load_system_settings_into_config() -> None:
                 for row in rows:
                     key = row["key"].lower()
                     val = row["value"]
+                    if key in {"ai_api_key", "telegram_bot_token", "twitter_password", "secret_key"} and is_secret_placeholder_or_empty(key, val):
+                        continue
                     if hasattr(settings, key):
                         attr_val = getattr(settings, key)
                         optional_bool_keys = {"daily_digest_enabled", "quiet_hours_enabled"}

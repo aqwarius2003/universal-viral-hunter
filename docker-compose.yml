@@ -21,6 +21,7 @@ services:
     volumes:
       # Persistent storage for SQLite database, settings, and X.com cookies
       - ./data:/app/data
+      - ./.env:/app/.env
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/auth/setup_status"]
       interval: 30s

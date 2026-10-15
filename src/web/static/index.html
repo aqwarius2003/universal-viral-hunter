@@ -1914,8 +1914,14 @@
               <div class="health-meta" id="meta-gemini"></div>
             </div>
           </div>
-          <div class="health-card-footer">
-            <button class="btn btn-sm" id="btn-check-gemini" onclick="checkSingleIntegration('gemini')">
+          <div class="health-card-footer" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;">
+            <div style="display: flex; gap: 6px;">
+              <input type="password" class="form-control" id="quick-gemini-key" placeholder="Вставьте Gemini API Key (AIzaSy...)" style="font-size: 0.8rem; padding: 4px 8px; height: 32px;" autocomplete="off">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-gemini-quick" onclick="saveGeminiQuickKey()" style="white-space: nowrap; height: 32px; padding: 0 10px; font-size: 0.8rem;">
+                Сохранить
+              </button>
+            </div>
+            <button class="btn btn-sm" id="btn-check-gemini" onclick="checkSingleIntegration('gemini')" style="align-self: flex-start;">
               <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
               Проверить связь
             </button>
@@ -1938,8 +1944,15 @@
               <div class="health-meta" id="meta-telegram"></div>
             </div>
           </div>
-          <div class="health-card-footer">
-            <button class="btn btn-sm" id="btn-check-telegram" onclick="checkSingleIntegration('telegram')">
+          <div class="health-card-footer" style="display: flex; flex-direction: column; gap: 8px; align-items: stretch;">
+            <div style="display: flex; gap: 6px;">
+              <input type="password" class="form-control" id="quick-telegram-token" placeholder="Bot Token" style="font-size: 0.8rem; padding: 4px 8px; height: 32px;" autocomplete="off">
+              <input type="text" class="form-control" id="quick-telegram-channel" placeholder="@channel" style="font-size: 0.8rem; padding: 4px 8px; height: 32px;" autocomplete="off">
+              <button type="button" class="btn btn-primary btn-sm" id="btn-save-telegram-quick" onclick="saveTelegramQuick()" style="white-space: nowrap; height: 32px; padding: 0 10px; font-size: 0.8rem;">
+                Сохранить
+              </button>
+            </div>
+            <button class="btn btn-sm" id="btn-check-telegram" onclick="checkSingleIntegration('telegram')" style="align-self: flex-start;">
               <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"></path><path d="M1.42 9a16 16 0 0 1 21.16 0"></path><path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path><line x1="12" y1="20" x2="12.01" y2="20"></line></svg>
               Проверить связь
             </button>
@@ -2086,12 +2099,12 @@
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label" for="setting-min-score">Порог виральности (Min Viral Score)</label>
-                <input type="number" step="0.1" class="form-control" id="setting-min-score" name="min_viral_score" required>
+                <input type="number" step="0.1" class="form-control" id="setting-min-score" name="min_viral_score" placeholder="75.0">
                 <p class="form-hint">Минимальный скор для попадания в очередь (по умолчанию: 75.0)</p>
               </div>
               <div class="form-group">
                 <label class="form-label" for="setting-super-score">Порог супер-виральности (Super Viral)</label>
-                <input type="number" step="0.1" class="form-control" id="setting-super-score" name="super_viral_threshold" required>
+                <input type="number" step="0.1" class="form-control" id="setting-super-score" name="super_viral_threshold" placeholder="100.0">
                 <p class="form-hint">Скор для авто-публикации отдельным постом перед дайджестом (по умолчанию: 100.0)</p>
               </div>
             </div>
@@ -2099,12 +2112,12 @@
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label" for="setting-max-posts">Лимит публикаций за запуск (Max Posts)</label>
-                <input type="number" min="1" max="10" class="form-control" id="setting-max-posts" name="max_posts_per_run" required>
+                <input type="number" min="1" max="10" class="form-control" id="setting-max-posts" name="max_posts_per_run" placeholder="1">
                 <p class="form-hint">Сколько топ-постов публиковать за один цикл (по умолчанию: 1)</p>
               </div>
               <div class="form-group">
                 <label class="form-label" for="setting-interval">Интервал проверки (минуты)</label>
-                <input type="number" min="5" step="5" class="form-control" id="setting-interval" name="scheduler_interval_minutes" required>
+                <input type="number" min="5" step="5" class="form-control" id="setting-interval" name="scheduler_interval_minutes" placeholder="120">
                 <p class="form-hint">Периодичность сбора постов планировщиком (120 = 2 часа)</p>
               </div>
             </div>
@@ -2164,7 +2177,7 @@
               </div>
               <div class="form-group">
                 <label class="form-label" for="setting-delay">Задержка между запросами к ИИ (сек)</label>
-                <input type="number" min="0" max="120" class="form-control" id="setting-delay" name="ai_request_delay_seconds" required>
+                <input type="number" min="0" max="120" class="form-control" id="setting-delay" name="ai_request_delay_seconds" placeholder="4">
                 <p class="form-hint">Интервал между вызовами Gemini (12 сек для 5 RPM, 4 сек для 15 RPM)</p>
               </div>
             </div>
@@ -2339,9 +2352,14 @@
                 </div>
                 <div class="form-group">
                   <label class="form-label" for="setting-channel">ID или Username канала</label>
-                  <input type="text" class="form-control" id="setting-channel" name="telegram_channel_id" placeholder="@your_channel" required>
+                  <input type="text" class="form-control" id="setting-channel" name="telegram_channel_id" placeholder="@your_channel">
                   <p class="form-hint">Канал для публикации постов (@channel или -100...)</p>
                 </div>
+              </div>
+              <div style="margin-top: 10px; display: flex; gap: 8px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-save-keys-only" onclick="saveIntegrationKeysOnly()">
+                  💾 Сохранить только ключи API
+                </button>
               </div>
             </div>
 
@@ -4418,18 +4436,37 @@
       e.preventDefault();
       const form = document.getElementById("settings-form");
       const formData = new FormData(form);
-      const payload = {
-        min_viral_score: parseFloat(formData.get("min_viral_score")),
-        super_viral_threshold: parseFloat(formData.get("super_viral_threshold")),
-        max_posts_per_run: parseInt(formData.get("max_posts_per_run")),
-        scheduler_interval_minutes: parseInt(formData.get("scheduler_interval_minutes")),
-        ai_request_delay_seconds: parseInt(formData.get("ai_request_delay_seconds")),
-        quiet_hours_enabled: document.getElementById("setting-quiet-enabled").checked,
-        quiet_hours_start: document.getElementById("setting-quiet-start").value.trim(),
-        quiet_hours_end: document.getElementById("setting-quiet-end").value.trim(),
-        telegram_channel_id: formData.get("telegram_channel_id"),
-        ai_model_name: formData.get("ai_model_name"),
-      };
+      const payload = {};
+
+      const minScore = parseFloat(formData.get("min_viral_score"));
+      if (!isNaN(minScore)) payload.min_viral_score = minScore;
+
+      const superScore = parseFloat(formData.get("super_viral_threshold"));
+      if (!isNaN(superScore)) payload.super_viral_threshold = superScore;
+
+      const maxPosts = parseInt(formData.get("max_posts_per_run"), 10);
+      if (!isNaN(maxPosts)) payload.max_posts_per_run = maxPosts;
+
+      const schedInterval = parseInt(formData.get("scheduler_interval_minutes"), 10);
+      if (!isNaN(schedInterval)) payload.scheduler_interval_minutes = schedInterval;
+
+      const aiDelay = parseInt(formData.get("ai_request_delay_seconds"), 10);
+      if (!isNaN(aiDelay)) payload.ai_request_delay_seconds = aiDelay;
+
+      const quietEnabled = document.getElementById("setting-quiet-enabled");
+      if (quietEnabled) payload.quiet_hours_enabled = quietEnabled.checked;
+
+      const quietStart = document.getElementById("setting-quiet-start");
+      if (quietStart) payload.quiet_hours_start = quietStart.value.trim() || null;
+
+      const quietEnd = document.getElementById("setting-quiet-end");
+      if (quietEnd) payload.quiet_hours_end = quietEnd.value.trim() || null;
+
+      const chanId = formData.get("telegram_channel_id");
+      if (chanId && chanId.trim()) payload.telegram_channel_id = chanId.trim();
+
+      const modelName = formData.get("ai_model_name");
+      if (modelName && modelName.trim()) payload.ai_model_name = modelName.trim();
 
       const timezoneSelect = document.getElementById("setting-timezone");
       const timezoneOffset = document.getElementById("setting-timezone-offset");
@@ -4447,13 +4484,16 @@
         payload.queue_sort_strategy = document.getElementById("setting-queue-sort-strategy").value;
       }
       if (document.getElementById("setting-scout-interval")) {
-        payload.scout_interval_minutes = parseInt(document.getElementById("setting-scout-interval").value) || null;
+        const val = parseInt(document.getElementById("setting-scout-interval").value, 10);
+        if (!isNaN(val)) payload.scout_interval_minutes = val;
       }
       if (document.getElementById("setting-metric-refresh-limit")) {
-        payload.metric_refresh_limit = parseInt(document.getElementById("setting-metric-refresh-limit").value, 10);
+        const val = parseInt(document.getElementById("setting-metric-refresh-limit").value, 10);
+        if (!isNaN(val)) payload.metric_refresh_limit = val;
       }
       if (document.getElementById("setting-metric-refresh-hours")) {
-        payload.metric_refresh_hours = parseInt(document.getElementById("setting-metric-refresh-hours").value, 10);
+        const val = parseInt(document.getElementById("setting-metric-refresh-hours").value, 10);
+        if (!isNaN(val)) payload.metric_refresh_hours = val;
       }
 
       if (document.getElementById("setting-show-likes")) payload.show_metric_likes = document.getElementById("setting-show-likes").checked;
@@ -4469,20 +4509,33 @@
       if (document.getElementById("setting-editor-sys-prompt")) payload.editor_system_prompt = document.getElementById("setting-editor-sys-prompt").value;
       if (document.getElementById("setting-editor-template")) payload.editor_prompt_template = document.getElementById("setting-editor-template").value;
 
-      if (document.getElementById("setting-video-ttl")) payload.video_ttl_days = parseInt(document.getElementById("setting-video-ttl").value, 10);
-      if (document.getElementById("setting-video-quality")) payload.video_max_quality = parseInt(document.getElementById("setting-video-quality").value, 10);
-      if (document.getElementById("setting-video-size")) payload.video_max_size_mb = parseInt(document.getElementById("setting-video-size").value, 10);
+      if (document.getElementById("setting-video-ttl")) {
+        const val = parseInt(document.getElementById("setting-video-ttl").value, 10);
+        if (!isNaN(val)) payload.video_ttl_days = val;
+      }
+      if (document.getElementById("setting-video-quality")) {
+        const val = parseInt(document.getElementById("setting-video-quality").value, 10);
+        if (!isNaN(val)) payload.video_max_quality = val;
+      }
+      if (document.getElementById("setting-video-size")) {
+        const val = parseInt(document.getElementById("setting-video-size").value, 10);
+        if (!isNaN(val)) payload.video_max_size_mb = val;
+      }
       if (document.getElementById("setting-approval-required")) payload.approval_required = document.getElementById("setting-approval-required").checked;
       if (document.getElementById("setting-telegram-admin-id")) payload.telegram_admin_id = document.getElementById("setting-telegram-admin-id").value.trim();
 
-      const aiKey = formData.get("ai_api_key");
-      if (aiKey && !aiKey.includes("...")) {
-        payload.ai_api_key = aiKey.trim();
+      const aiKeyInput = document.getElementById("setting-gemini-key");
+      const aiKeyVal = (aiKeyInput ? aiKeyInput.value : (formData.get("ai_api_key") || "")).trim();
+      if (aiKeyVal && !aiKeyVal.includes("...") && !aiKeyVal.includes("***") && !aiKeyVal.startsWith("your_")) {
+        payload.ai_api_key = aiKeyVal;
       }
-      const botToken = formData.get("telegram_bot_token");
-      if (botToken && !botToken.includes("...")) {
-        payload.telegram_bot_token = botToken.trim();
+
+      const botTokenInput = document.getElementById("setting-bot-token");
+      const botTokenVal = (botTokenInput ? botTokenInput.value : (formData.get("telegram_bot_token") || "")).trim();
+      if (botTokenVal && !botTokenVal.includes("...") && !botTokenVal.includes("***") && !botTokenVal.startsWith("your_")) {
+        payload.telegram_bot_token = botTokenVal;
       }
+
       const proxyInput = document.getElementById("tw-login-proxy");
       if (proxyInput) {
         payload.twitter_proxy_url = proxyInput.value.trim();
@@ -4507,11 +4560,135 @@
           showToast("Настройки успешно сохранены!", "success");
           pollApiStatus();
           loadSettings();
+          checkSingleIntegration("gemini");
         } else {
           showToast("Ошибка сохранения настроек", "error");
         }
       } catch (err) {
         showToast("Ошибка: " + err.message, "error");
+      }
+    }
+
+    async function saveGeminiQuickKey() {
+      const input = document.getElementById("quick-gemini-key");
+      const val = input ? input.value.trim() : "";
+      if (!val || val.includes("...") || val.includes("***") || val.startsWith("your_")) {
+        showToast("Введите корректный Google Gemini API Key", "error");
+        return;
+      }
+      const btn = document.getElementById("btn-save-gemini-quick");
+      if (btn) { btn.disabled = true; btn.textContent = "Сохранение..."; }
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ai_api_key: val })
+        });
+        if (res.ok) {
+          showToast("Gemini API Key сохранён!", "success");
+          if (input) input.value = "";
+          const settingsKey = document.getElementById("setting-gemini-key");
+          if (settingsKey) {
+            settingsKey.value = val.slice(0, 7) + "..." + val.slice(-4);
+          }
+          await checkSingleIntegration("gemini");
+          pollApiStatus();
+          loadSettings();
+        } else {
+          const err = await res.json();
+          showToast("Ошибка сохранения: " + (err.error || res.statusText), "error");
+        }
+      } catch (e) {
+        showToast("Ошибка: " + e.message, "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Сохранить"; }
+      }
+    }
+
+    async function saveTelegramQuick() {
+      const tokenInput = document.getElementById("quick-telegram-token");
+      const chanInput = document.getElementById("quick-telegram-channel");
+      const token = tokenInput ? tokenInput.value.trim() : "";
+      const chan = chanInput ? chanInput.value.trim() : "";
+      const payload = {};
+      if (token && !token.includes("...") && !token.startsWith("your_")) payload.telegram_bot_token = token;
+      if (chan && !chan.startsWith("your_")) payload.telegram_channel_id = chan;
+      if (Object.keys(payload).length === 0) {
+        showToast("Введите токен бота или ID канала", "error");
+        return;
+      }
+      const btn = document.getElementById("btn-save-telegram-quick");
+      if (btn) { btn.disabled = true; btn.textContent = "Сохранение..."; }
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          showToast("Telegram настройки сохранены!", "success");
+          if (tokenInput) tokenInput.value = "";
+          await checkSingleIntegration("telegram");
+          pollApiStatus();
+          loadSettings();
+        } else {
+          const err = await res.json();
+          showToast("Ошибка сохранения: " + (err.error || res.statusText), "error");
+        }
+      } catch (e) {
+        showToast("Ошибка: " + e.message, "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "Сохранить"; }
+      }
+    }
+
+    async function saveIntegrationKeysOnly() {
+      const payload = {};
+      const aiKeyInput = document.getElementById("setting-gemini-key");
+      const aiKey = aiKeyInput ? aiKeyInput.value.trim() : "";
+      if (aiKey && !aiKey.includes("...") && !aiKey.includes("***") && !aiKey.startsWith("your_")) {
+        payload.ai_api_key = aiKey;
+      }
+      const botTokenInput = document.getElementById("setting-bot-token");
+      const botToken = botTokenInput ? botTokenInput.value.trim() : "";
+      if (botToken && !botToken.includes("...") && !botToken.includes("***") && !botToken.startsWith("your_")) {
+        payload.telegram_bot_token = botToken;
+      }
+      const chanInput = document.getElementById("setting-channel");
+      const chan = chanInput ? chanInput.value.trim() : "";
+      if (chan && !chan.startsWith("your_")) {
+        payload.telegram_channel_id = chan;
+      }
+      const modelInput = document.getElementById("setting-model");
+      const model = modelInput ? modelInput.value.trim() : "";
+      if (model) {
+        payload.ai_model_name = model;
+      }
+      if (Object.keys(payload).length === 0) {
+        showToast("Нет новых ключей для сохранения (или значения не изменены)", "info");
+        return;
+      }
+      const btn = document.getElementById("btn-save-keys-only");
+      if (btn) { btn.disabled = true; btn.textContent = "Сохранение..."; }
+      try {
+        const res = await fetch("/api/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          showToast("Ключи API успешно сохранены!", "success");
+          pollApiStatus();
+          loadSettings();
+          checkSingleIntegration("gemini");
+        } else {
+          const err = await res.json();
+          showToast("Ошибка: " + (err.error || res.statusText), "error");
+        }
+      } catch (e) {
+        showToast("Ошибка: " + e.message, "error");
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = "💾 Сохранить только ключи API"; }
       }
     }
 

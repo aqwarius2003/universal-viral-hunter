@@ -769,6 +769,8 @@ async def handle_system_backup(request: web.Request) -> web.Response:
 
 async def handle_get_settings(request: web.Request) -> web.Response:
     """Returns active settings with sensitive credentials masked."""
+    await init_db()
+    await load_system_settings_into_config()
     return web.json_response({
         "min_viral_score": settings.min_viral_score,
         "super_viral_threshold": getattr(settings, "super_viral_threshold", 100.0),
@@ -927,32 +929,47 @@ async def handle_update_settings(request: web.Request) -> web.Response:
         if not val:
             return False
         s = str(val).strip()
-        if not s or "*" in s or "..." in s or "•••" in s:
+        if not s or "*" in s or "..." in s or "•••" in s or s.lower().startswith("your_"):
             return False
         return True
 
-    if "min_viral_score" in data:
-        db_updates["min_viral_score"] = float(data["min_viral_score"])
+    if "min_viral_score" in data and data["min_viral_score"] not in (None, ""):
+        try:
+            db_updates["min_viral_score"] = float(data["min_viral_score"])
+        except (ValueError, TypeError):
+            pass
 
-    if "super_viral_threshold" in data:
-        db_updates["super_viral_threshold"] = float(data["super_viral_threshold"])
+    if "super_viral_threshold" in data and data["super_viral_threshold"] not in (None, ""):
+        try:
+            db_updates["super_viral_threshold"] = float(data["super_viral_threshold"])
+        except (ValueError, TypeError):
+            pass
 
-    if "max_posts_per_run" in data:
-        db_updates["max_posts_per_run"] = int(data["max_posts_per_run"])
+    if "max_posts_per_run" in data and data["max_posts_per_run"] not in (None, ""):
+        try:
+            db_updates["max_posts_per_run"] = int(data["max_posts_per_run"])
+        except (ValueError, TypeError):
+            pass
 
     if "scheduler_interval_minutes" in data:
         value = data["scheduler_interval_minutes"]
         if value not in (None, ""):
-            db_updates["scheduler_interval_minutes"] = int(value)
+            try:
+                db_updates["scheduler_interval_minutes"] = int(value)
+            except (ValueError, TypeError):
+                pass
 
-    if "ai_request_delay_seconds" in data:
-        db_updates["ai_request_delay_seconds"] = max(0, int(data["ai_request_delay_seconds"]))
+    if "ai_request_delay_seconds" in data and data["ai_request_delay_seconds"] not in (None, ""):
+        try:
+            db_updates["ai_request_delay_seconds"] = max(0, int(data["ai_request_delay_seconds"]))
+        except (ValueError, TypeError):
+            pass
 
-    if "daily_digest_enabled" in data:
+    if "daily_digest_enabled" in data and data["daily_digest_enabled"] is not None:
         db_updates["daily_digest_enabled"] = bool(data["daily_digest_enabled"])
 
     if "daily_digest_time" in data:
-        raw_digest_time = str(data["daily_digest_time"]).strip()
+        raw_digest_time = str(data["daily_digest_time"] or "").strip()
         from src.scheduler import normalize_schedule_times
         cleaned_list = normalize_schedule_times(raw_digest_time)
         cleaned_times = ", ".join(cleaned_list)
@@ -976,35 +993,44 @@ async def handle_update_settings(request: web.Request) -> web.Response:
         except Exception:
             return ""
 
-    if "quiet_hours_enabled" in data:
+    if "quiet_hours_enabled" in data and data["quiet_hours_enabled"] is not None:
         db_updates["quiet_hours_enabled"] = bool(data["quiet_hours_enabled"])
 
     if "quiet_hours_start" in data:
-        qh_start = normalize_time(str(data["quiet_hours_start"]))
+        qh_start = normalize_time(str(data["quiet_hours_start"] or ""))
         db_updates["quiet_hours_start"] = qh_start or None
 
     if "quiet_hours_end" in data:
-        qh_end = normalize_time(str(data["quiet_hours_end"]))
+        qh_end = normalize_time(str(data["quiet_hours_end"] or ""))
         db_updates["quiet_hours_end"] = qh_end or None
 
-    if "digest_pre_sleep_minutes" in data:
-        db_updates["digest_pre_sleep_minutes"] = max(1, int(data["digest_pre_sleep_minutes"]))
+    if "digest_pre_sleep_minutes" in data and data["digest_pre_sleep_minutes"] not in (None, ""):
+        try:
+            db_updates["digest_pre_sleep_minutes"] = max(1, int(data["digest_pre_sleep_minutes"]))
+        except (ValueError, TypeError):
+            pass
 
-    if "digest_block_interval_minutes" in data:
-        db_updates["digest_block_interval_minutes"] = max(1, int(data["digest_block_interval_minutes"]))
+    if "digest_block_interval_minutes" in data and data["digest_block_interval_minutes"] not in (None, ""):
+        try:
+            db_updates["digest_block_interval_minutes"] = max(1, int(data["digest_block_interval_minutes"]))
+        except (ValueError, TypeError):
+            pass
 
-    if "daytime_publish_interval_minutes" in data:
-        db_updates["daytime_publish_interval_minutes"] = max(1, int(data["daytime_publish_interval_minutes"]))
+    if "daytime_publish_interval_minutes" in data and data["daytime_publish_interval_minutes"] not in (None, ""):
+        try:
+            db_updates["daytime_publish_interval_minutes"] = max(1, int(data["daytime_publish_interval_minutes"]))
+        except (ValueError, TypeError):
+            pass
 
     if "ai_model_name" in data:
-        model = str(data["ai_model_name"]).strip()
+        model = str(data["ai_model_name"] or "").strip()
         if model:
             db_updates["ai_model_name"] = model
         else:
             db_updates["ai_model_name"] = "gemini-3.5-flash-lite, gemini-3.1-flash-lite"
 
     if "telegram_channel_id" in data:
-        channel = str(data["telegram_channel_id"]).strip()
+        channel = str(data["telegram_channel_id"] or "").strip()
         if channel and not channel.startswith("@") and not channel.startswith("-") and not channel.isdigit():
             channel = f"@{channel}"
         db_updates["telegram_channel_id"] = channel
@@ -1012,6 +1038,11 @@ async def handle_update_settings(request: web.Request) -> web.Response:
     # Sensitive fields - only update if provided and not masked
     if "ai_api_key" in data and is_unmasked(data["ai_api_key"]):
         db_updates["ai_api_key"] = str(data["ai_api_key"]).strip()
+        try:
+            from src.ai.agents.editor import reset_client
+            reset_client()
+        except Exception:
+            pass
 
     if "telegram_bot_token" in data and is_unmasked(data["telegram_bot_token"]):
         db_updates["telegram_bot_token"] = str(data["telegram_bot_token"]).strip()
@@ -1297,8 +1328,11 @@ async def check_gemini_health() -> Dict[str, Any]:
     """
     Checks Google Gemini API readiness, API key, active model, and rate limit status.
     """
+    await init_db()
+    await load_system_settings_into_config()
     key = settings.ai_api_key
-    if not key or "your_gemini_api_key" in key or len(key.strip()) < 8:
+    from src.db import is_secret_placeholder_or_empty
+    if not key or is_secret_placeholder_or_empty("ai_api_key", key) or len(key.strip()) < 8:
         return {
             "name": "Google Gemini",
             "status": "error",
@@ -1696,9 +1730,15 @@ async def handle_delete_topic(request: web.Request) -> web.Response:
     await delete_topic(topic_id)
     return web.json_response({"status": "success"})
 
+async def on_app_startup(app: web.Application) -> None:
+    await init_db()
+    await load_system_settings_into_config()
+
+
 def create_app() -> web.Application:
     """Creates and configures the web application with authentication middleware."""
     app = web.Application(middlewares=[auth_middleware])
+    app.on_startup.append(on_app_startup)
 
     # CORS / Static & Routes
     app.router.add_get("/", handle_index)
