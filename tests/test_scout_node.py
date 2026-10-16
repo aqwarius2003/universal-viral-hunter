@@ -331,8 +331,10 @@ async def test_scout_node_string_view_count():
 
 
 @pytest.mark.asyncio
-async def test_scout_node_retries_with_refresh_transaction():
+async def test_scout_node_retries_with_refresh_transaction(monkeypatch):
     """Verifies that scout_node calls refresh_transaction and retries when search fails once."""
+    from src.config import settings
+    monkeypatch.setattr(settings, "scout_search_mode", "TOP")
     mock_tweet = MagicMock()
     mock_tweet.id = 555
     mock_tweet.text = "Recovered AI tweet"
@@ -394,7 +396,9 @@ async def test_scout_node_in_batch_deduplication():
 
 
 @pytest.mark.asyncio
-async def test_scout_node_retry_failure_is_handled():
+async def test_scout_node_retry_failure_is_handled(monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "scout_search_mode", "TOP")
     mock_client = MagicMock()
     mock_client.search_tweet = AsyncMock(side_effect=[
         Exception("First transaction error"),

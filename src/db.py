@@ -1092,6 +1092,7 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
 
     secret_field_names = {"ai_api_key", "telegram_bot_token", "twitter_password", "secret_key"}
 
+    await init_db()
     async with aiosqlite.connect(settings.db_path) as db:
         for key, val in settings_dict.items():
             if val is None:
@@ -1100,8 +1101,9 @@ async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Opt
                     setattr(settings, key.lower(), None)
                 continue
             str_val = str(val).strip()
-            # Guard: ignore masked or placeholder values for secret fields only
-            if key.lower() in secret_field_names and is_secret_placeholder_or_empty(key, str_val):
+            # Guard: ignore masked or placeholder values for secret fields
+            is_secret = key.lower() in secret_field_names or any(s in key.lower() for s in ("secret", "token", "password")) or key.lower().endswith("_key")
+            if is_secret and is_secret_placeholder_or_empty(key, str_val):
                 continue
 
             await db.execute(

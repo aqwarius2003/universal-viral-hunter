@@ -314,7 +314,7 @@ async def test_call_llm_non_429_error_raises_immediately():
 @pytest.mark.asyncio
 async def test_editor_node_skips_post_on_dual_429_without_crashing():
     """Verifies that when call_llm returns None (dual 429), editor_node skips post and continues."""
-    async def mock_call_llm(text, media_urls=None):
+    async def mock_call_llm(text, media_urls=None, **kwargs):
         if "QuotaExhausted" in text:
             return None  # Both models failed with 429
         return {

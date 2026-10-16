@@ -35,7 +35,7 @@ def test_tweet_summary_schema_with_image():
 @pytest.mark.asyncio
 async def test_editor_node_combined_score_and_sorting(mocker):
     # Mock call_llm to return different impact_scores
-    async def mock_call_llm(text, media_urls=None):
+    async def mock_call_llm(text, media_urls=None, **kwargs):
         if "HighImpact" in text:
             return {
                 "title_ru": "Супер прорыв",
@@ -96,7 +96,7 @@ async def test_editor_node_combined_score_and_sorting(mocker):
 
 @pytest.mark.asyncio
 async def test_editor_node_regenerates_failed_drafts(mocker):
-    async def mock_call_llm(text, media_urls=None):
+    async def mock_call_llm(text, media_urls=None, **kwargs):
         return {
             "title_ru": "Исправленный заголовок",
             "summary_ru": "Новое описание.",

@@ -381,7 +381,7 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
             tweet_id=top_draft["tweet_id"],
             score=top_draft.get("viral_score", 0.0),
             is_viral=True,
-            status=new_status,
+            status="POSTED",
             impact_score=summary_data.get("impact_score", 0),
             summary_json=json.dumps(summary_data, ensure_ascii=False),
         )

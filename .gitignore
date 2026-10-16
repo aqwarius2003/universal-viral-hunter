@@ -59,3 +59,10 @@ data/
 id_rsa*
 id_ed25519*
 deploy_key*
+
+# 🤖 Agent configs & scratch files
+.agent/
+.kilo/
+interview_answer*.txt
+test_search.py
+uv.lock
