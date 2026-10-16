@@ -4333,7 +4333,7 @@
         const data = await res.json();
         if (res.ok && data.tweet) {
           showToast("✨ ИИ успешно переработал текст с учетом ваших правок!", "success");
-          const s = data.tweet.summary_data || {};
+          const s = data.tweet.summary_data || data.tweet.ai_data || {};
           document.getElementById("edit-title").value = s.title_ru || "";
           document.getElementById("edit-summary").value = s.summary_ru || "";
           document.getElementById("edit-takeaways").value = (s.takeaways || []).join("\n");

@@ -161,6 +161,57 @@ async def init_db() -> None:
                 if "admin_message_id" not in cols:
                     await db.execute("ALTER TABLE tweets ADD COLUMN admin_message_id INTEGER")
 
+        # Migrate legacy tweets CHECK constraint if needed (adds PROCESSING and PENDING_APPROVAL)
+        async with db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='tweets'") as cursor:
+            tbl_row = await cursor.fetchone()
+            if tbl_row and tbl_row[0] and "PROCESSING" not in tbl_row[0]:
+                await db.execute("PRAGMA foreign_keys=OFF")
+                await db.execute("ALTER TABLE tweets RENAME TO tweets_legacy_migration")
+                await db.execute("""
+                    CREATE TABLE tweets (
+                        tweet_id TEXT PRIMARY KEY,
+                        author_handle TEXT NOT NULL,
+                        author_name TEXT,
+                        text_raw TEXT NOT NULL,
+                        tweet_url TEXT NOT NULL,
+                        created_at TIMESTAMP NOT NULL,
+                        likes_count INTEGER DEFAULT 0,
+                        reposts_count INTEGER DEFAULT 0,
+                        quotes_count INTEGER DEFAULT 0,
+                        bookmarks_count INTEGER DEFAULT 0,
+                        impressions_count INTEGER DEFAULT 0,
+                        viral_score REAL NOT NULL,
+                        impact_score INTEGER DEFAULT 0,
+                        is_viral BOOLEAN DEFAULT 0,
+                        media_urls TEXT DEFAULT '[]',
+                        summary_json TEXT,
+                        status TEXT CHECK(status IN ('RAW', 'PROCESSED', 'SCHEDULED', 'POSTED', 'FAILED', 'IGNORED', 'IN_DIGEST', 'PROCESSING', 'PENDING_APPROVAL')) DEFAULT 'RAW',
+                        scheduled_at TIMESTAMP,
+                        queue_order INTEGER DEFAULT 0,
+                        posted_at TIMESTAMP,
+                        inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        digest_id INTEGER,
+                        topic_id INTEGER,
+                        video_data TEXT,
+                        admin_message_id INTEGER
+                    )
+                """)
+                async with db.execute("PRAGMA table_info(tweets_legacy_migration)") as c_cursor:
+                    legacy_cols = [r[1] for r in await c_cursor.fetchall()]
+                target_cols = [
+                    "tweet_id", "author_handle", "author_name", "text_raw", "tweet_url",
+                    "created_at", "likes_count", "reposts_count", "quotes_count", "bookmarks_count",
+                    "impressions_count", "viral_score", "impact_score", "is_viral", "media_urls",
+                    "summary_json", "status", "scheduled_at", "queue_order", "posted_at",
+                    "inserted_at", "digest_id", "topic_id", "video_data", "admin_message_id"
+                ]
+                common_cols = [col for col in target_cols if col in legacy_cols]
+                cols_str = ", ".join(common_cols)
+                await db.execute(f"INSERT INTO tweets ({cols_str}) SELECT {cols_str} FROM tweets_legacy_migration")
+                await db.execute("DROP TABLE tweets_legacy_migration")
+                await db.execute("PRAGMA foreign_keys=ON")
+                await db.commit()
+
         # 2. Create indexes
         await db.execute("CREATE INDEX IF NOT EXISTS idx_viral_status ON tweets(is_viral, status);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON tweets(created_at);")

@@ -100,7 +100,20 @@ def parse_json_safely(text: str) -> dict:
 
 
 async def download_image(session: aiohttp.ClientSession, url: str) -> Optional[tuple[bytes, str]]:
-    """Downloads an image from URL and returns (bytes, mime_type) or None."""
+    """Downloads an image from URL or reads from local file and returns (bytes, mime_type) or None."""
+    if not url:
+        return None
+    # Check for local file path (e.g. video thumbnails)
+    if isinstance(url, str) and (os.path.exists(url) or (not url.startswith("http://") and not url.startswith("https://"))):
+        if os.path.exists(url):
+            try:
+                with open(url, "rb") as f:
+                    data = f.read()
+                mime = "image/png" if url.lower().endswith(".png") else "image/jpeg"
+                return data, mime
+            except Exception as err:
+                print(f"⚠️ Ошибка чтения локального файла {url}: {err}")
+        return None
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 200:
@@ -530,67 +543,79 @@ async def reprocess_tweet_with_editor_feedback(
     # 1. Mark as PROCESSING in DB so UI immediately reflects processing state
     await set_tweet_status(tweet_id, "PROCESSING")
 
-    tweet = await get_tweet_by_id(tweet_id)
-    if not tweet:
-        raise ValueError(f"Твит {tweet_id} не найден в базе данных.")
+    try:
+        tweet = await get_tweet_by_id(tweet_id)
+        if not tweet:
+            raise ValueError(f"Твит {tweet_id} не найден в базе данных.")
 
-    media_urls = tweet.get("media_urls", [])
-    video_data = tweet.get("video_data")
-    if video_data and isinstance(video_data, dict) and video_data.get("thumbnail"):
-        media_urls = [video_data["thumbnail"]]
+        media_urls = tweet.get("media_urls", [])
+        video_data = tweet.get("video_data")
+        if video_data and isinstance(video_data, dict) and video_data.get("thumbnail"):
+            media_urls = [video_data["thumbnail"]]
 
-    active_topics = await get_active_topics()
-    topic = next((t for t in active_topics if t["id"] == tweet.get("topic_id")), None)
+        active_topics = await get_active_topics()
+        topic = next((t for t in active_topics if t["id"] == tweet.get("topic_id")), None)
 
-    # 2. Call LLM with editor instruction (technical audit runs automatically inside call_llm)
-    ai_data = await call_llm(
-        text=tweet.get("text_raw", ""),
-        media_urls=media_urls,
-        topic=topic,
-        editor_instruction=feedback,
-        tweet=tweet,
-    )
-    if not ai_data:
-        # Revert status on quota failure
-        await set_tweet_status(tweet_id, "PROCESSED")
-        raise RuntimeError("ИИ временно недоступен (лимит квот исчерпан). Попробуйте позже.")
+        # 2. Call LLM with editor instruction (technical audit runs automatically inside call_llm)
+        ai_data = await call_llm(
+            text=tweet.get("text_raw", ""),
+            media_urls=media_urls,
+            topic=topic,
+            editor_instruction=feedback,
+            tweet=tweet,
+        )
+        if not ai_data:
+            raise RuntimeError("ИИ временно недоступен (лимит квот исчерпан или модель вернула пустой ответ).")
 
-    # 3. Technical Audit is guaranteed, re-verify
-    is_media = bool(media_urls or video_data)
-    audit_res = audit_and_prepare_telegram_content(
-        title=ai_data.get("title_ru", ""),
-        summary=ai_data.get("summary_ru", ""),
-        takeaways=ai_data.get("takeaways", []),
-        hashtags=ai_data.get("hashtags", []),
-        is_media=is_media,
-        author_handle=tweet.get("author_handle"),
-        tweet_url=tweet.get("tweet_url"),
-    )
-    ai_data["title_ru"] = audit_res["title_ru"]
-    ai_data["summary_ru"] = audit_res["summary_ru"]
-    ai_data["takeaways"] = audit_res["takeaways"]
-    ai_data["hashtags"] = audit_res["hashtags"]
-    ai_data["technical_audit"] = {
-        "is_valid": audit_res["is_valid"],
-        "char_count": audit_res["char_count"],
-        "max_limit": audit_res["max_limit"],
-        "warnings": audit_res["warnings"],
-    }
+        # 3. Technical Audit is guaranteed, re-verify
+        is_media = bool(media_urls or video_data)
+        audit_res = audit_and_prepare_telegram_content(
+            title=ai_data.get("title_ru", ""),
+            summary=ai_data.get("summary_ru", ""),
+            takeaways=ai_data.get("takeaways", []),
+            hashtags=ai_data.get("hashtags", []),
+            is_media=is_media,
+            author_handle=tweet.get("author_handle"),
+            tweet_url=tweet.get("tweet_url"),
+        )
+        ai_data["title_ru"] = audit_res["title_ru"]
+        ai_data["summary_ru"] = audit_res["summary_ru"]
+        ai_data["takeaways"] = audit_res["takeaways"]
+        ai_data["hashtags"] = audit_res["hashtags"]
+        ai_data["technical_audit"] = {
+            "is_valid": audit_res["is_valid"],
+            "char_count": audit_res["char_count"],
+            "max_limit": audit_res["max_limit"],
+            "warnings": audit_res["warnings"],
+        }
 
-    # 4. Save to DB with PENDING_APPROVAL status (or PROCESSED)
-    new_status = "PENDING_APPROVAL" if getattr(settings, "approval_required", False) else "PROCESSED"
-    await update_tweet_status_and_score(
-        tweet_id=tweet_id,
-        score=tweet.get("viral_score", 0.0),
-        is_viral=True,
-        status=new_status,
-        impact_score=ai_data.get("impact_score", 0),
-        summary_json=json.dumps(ai_data, ensure_ascii=False),
-    )
+        # 4. Save to DB with PENDING_APPROVAL status (or PROCESSED)
+        new_status = "PENDING_APPROVAL" if getattr(settings, "approval_required", False) else "PROCESSED"
+        await update_tweet_status_and_score(
+            tweet_id=tweet_id,
+            score=tweet.get("viral_score", 0.0),
+            is_viral=True,
+            status=new_status,
+            impact_score=ai_data.get("impact_score", 0),
+            summary_json=json.dumps(ai_data, ensure_ascii=False),
+        )
 
-    return {
-        "tweet_id": tweet_id,
-        "status": new_status,
-        "ai_data": ai_data,
-        "audit": audit_res,
-    }
+        updated_tweet = await get_tweet_by_id(tweet_id)
+        if updated_tweet:
+            updated_tweet["audit"] = audit_res
+            updated_tweet["ai_data"] = ai_data
+            return updated_tweet
+
+        return {
+            "tweet_id": tweet_id,
+            "status": new_status,
+            "summary_data": ai_data,
+            "ai_data": ai_data,
+            "audit": audit_res,
+        }
+    except Exception as err:
+        try:
+            await set_tweet_status(tweet_id, "PROCESSED")
+        except Exception:
+            pass
+        raise err

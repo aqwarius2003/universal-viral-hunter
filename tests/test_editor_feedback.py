@@ -55,3 +55,43 @@ async def test_reprocess_tweet_with_editor_feedback(tmp_path, monkeypatch):
         assert db_tweet["status"] == "PENDING_APPROVAL"
         summary_obj = json.loads(db_tweet["summary_json"])
         assert summary_obj["title_ru"] == "Водитель помог соседу по пробке"
+
+
+@pytest.mark.asyncio
+async def test_legacy_check_constraint_migration(tmp_path, monkeypatch):
+    """Test that existing databases with legacy CHECK constraints migrate seamlessly to support PROCESSING and PENDING_APPROVAL."""
+    test_db = str(tmp_path / "legacy_test.sqlite")
+    from src.config import settings
+    monkeypatch.setattr(settings, "db_path", test_db)
+
+    import aiosqlite
+    # Manually create table with old schema (without PROCESSING or PENDING_APPROVAL)
+    async with aiosqlite.connect(test_db) as db:
+        await db.execute("""
+            CREATE TABLE tweets (
+                tweet_id TEXT PRIMARY KEY,
+                author_handle TEXT NOT NULL,
+                author_name TEXT,
+                text_raw TEXT NOT NULL,
+                tweet_url TEXT NOT NULL,
+                created_at TIMESTAMP NOT NULL,
+                viral_score REAL NOT NULL,
+                status TEXT CHECK(status IN ('RAW', 'PROCESSED', 'SCHEDULED', 'POSTED', 'FAILED', 'IGNORED', 'IN_DIGEST')) DEFAULT 'RAW'
+            )
+        """)
+        await db.execute("INSERT INTO tweets (tweet_id, author_handle, text_raw, tweet_url, created_at, viral_score, status) VALUES ('old_1', '@user', 'text', 'https://x.com', '2026-10-16', 50.0, 'PROCESSED')")
+        await db.commit()
+
+    # Run init_db which should detect and migrate the CHECK constraint
+    await init_db()
+
+    # Now verify that updating to PROCESSING and PENDING_APPROVAL does NOT raise IntegrityError
+    from src.db import set_tweet_status, get_tweet_by_id
+    await set_tweet_status("old_1", "PROCESSING")
+    t1 = await get_tweet_by_id("old_1")
+    assert t1["status"] == "PROCESSING"
+
+    await set_tweet_status("old_1", "PENDING_APPROVAL")
+    t2 = await get_tweet_by_id("old_1")
+    assert t2["status"] == "PENDING_APPROVAL"
+
