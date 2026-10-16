@@ -204,12 +204,23 @@ async def send_post_card_to_admin(tweet: Dict[str, Any]) -> Optional[int]:
         video_local_path = video_data.get("local_path")
         video_thumbnail = video_data.get("thumbnail")
 
+        if video_local_path and not os.path.exists(video_local_path):
+            video_local_path = None
+        if not video_local_path and video_data.get("original_url"):
+            try:
+                from src.utils.video_manager import download_video
+                video_local_path = await download_video(tweet["tweet_id"], video_data["original_url"])
+            except Exception as dl_err:
+                print(f"⚠️ Ошибка загрузки видео для карточки модерации {tweet['tweet_id']}: {dl_err}")
+
     selected_idx = ai_data.get("selected_image_index")
     photo_url = None
     if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
         photo_url = media_urls[selected_idx]
     elif not video_local_path and media_urls:
         photo_url = media_urls[0]
+    elif not video_local_path and not photo_url and video_thumbnail:
+        photo_url = video_thumbnail
 
     from src.ai.agents.publisher import format_telegram_post
     formatted_text = format_telegram_post(tweet, ai_data, is_photo=bool(photo_url) or bool(video_local_path))
@@ -300,12 +311,23 @@ async def _publish_approved_post(tweet_id: str, custom_comment: str = None, bot:
         video_local_path = video_data.get("local_path")
         video_thumbnail = video_data.get("thumbnail")
 
+        if video_local_path and not os.path.exists(video_local_path):
+            video_local_path = None
+        if not video_local_path and video_data.get("original_url"):
+            try:
+                from src.utils.video_manager import download_video
+                video_local_path = await download_video(tweet_id, video_data["original_url"])
+            except Exception as dl_err:
+                print(f"⚠️ Ошибка загрузки видео при одобрении публикации {tweet_id}: {dl_err}")
+
     selected_idx = ai_data.get("selected_image_index")
     photo_url = None
     if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
         photo_url = media_urls[selected_idx]
     elif not video_local_path and media_urls:
         photo_url = media_urls[0]
+    elif not video_local_path and not photo_url and video_thumbnail:
+        photo_url = video_thumbnail
 
     from src.ai.agents.publisher import format_telegram_post
     formatted_text = format_telegram_post(tweet, ai_data, is_photo=bool(photo_url) or bool(video_local_path))

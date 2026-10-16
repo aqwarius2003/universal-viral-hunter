@@ -1608,6 +1608,10 @@
       color: #fce8e6;
       display: none;
     }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -1710,7 +1714,11 @@
           <h2 class="section-title">Очередь и расписание постов</h2>
           <p class="section-subtitle">Изменяйте время выхода, порядок публикации или редактируйте текст перед отправкой в Telegram.</p>
         </div>
-        <div style="display: flex; gap: 8px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btn-batch-reprocess" onclick="batchReprocessQueue()" title="Перегенерировать заголовки и текст всех постов в очереди">
+            <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+            ⚡ Переделать очередь
+          </button>
           <button class="btn btn-secondary" onclick="syncTelegramQueue()" title="Отправить карточки модерации всей очереди в Telegram админу">
             <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
             📱 Синхронизировать с Telegram
@@ -3961,6 +3969,7 @@
                 <span class="metric-badge" style="padding:4px 8px; font-size:0.8rem;"><span class="metric-icon">⚡</span>${viralScore}</span>
                 ${statusBadgeHtml}
                 <div style="display:flex; gap: 6px;">
+                  <button class="btn btn-sm" onclick="regenerateSinglePost('${p.tweet_id}', this)" title="Переделать через ИИ">🔄</button>
                   <button class="btn btn-sm" onclick="openEditModal('${p.tweet_id}')" title="Редактировать">✏️</button>
                   <button class="btn btn-sm btn-success" onclick="publishNow('${p.tweet_id}')" title="Опубликовать сейчас">🚀</button>
                   <button class="btn btn-sm btn-danger" onclick="deletePost('${p.tweet_id}')" title="Отменить">🗑️</button>
@@ -4086,6 +4095,10 @@
                   <button class="btn btn-sm" onclick="openEditModal('${p.tweet_id}')" title="Редактировать текст и фото">
                     <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     Редактировать
+                  </button>
+                  <button class="btn btn-sm" onclick="regenerateSinglePost('${p.tweet_id}', this)" title="Переделать заголовок и текст через ИИ">
+                    <svg class="btn-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg>
+                    Переделай
                   </button>
                 </div>
 
@@ -4354,6 +4367,70 @@
         await loadAllData();
       } catch (e) {
         showToast(e.message, "error");
+      }
+    }
+
+    async function regenerateSinglePost(tweetId, btnEl) {
+      const origHtml = btnEl ? btnEl.innerHTML : "";
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;margin-right:4px;">🔄</span> Переделываю...`;
+      }
+      showToast("ИИ переделывает заголовок и текст...", "info");
+      try {
+        const res = await fetch(`/api/posts/${tweetId}/generate_summary`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Ошибка перегенерации");
+        showToast("✨ Заголовок успешно переделан!", "success");
+        await loadQueue();
+      } catch (err) {
+        showToast("Ошибка: " + err.message, "error");
+      } finally {
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.innerHTML = origHtml;
+        }
+      }
+    }
+
+    async function batchReprocessQueue() {
+      const count = queueData ? queueData.length : 0;
+      if (count === 0) {
+        showToast("Очередь пуста, переделывать нечего", "info");
+        return;
+      }
+      const instruction = prompt(
+        `Перегенерировать ${count} постов в очереди под новый промпт?\n\n` +
+        `Оставьте пустым для стандартного обновленного промпта, либо введите особое пожелание шеф-редактора:`,
+        ""
+      );
+      if (instruction === null) return;
+
+      const btn = document.getElementById("btn-batch-reprocess");
+      const origHtml = btn ? btn.innerHTML : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;margin-right:4px;">⏳</span> Переделываю очередь...`;
+      }
+      showToast(`Запущена пакетная переработка ${count} постов через Gemini...`, "info");
+
+      try {
+        const res = await fetch("/api/queue/batch-reprocess", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction: (instruction || "").trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Ошибка пакетной обработки");
+        showToast(`🎉 Готово! Переработано: ${data.reprocessed} из ${data.total}`, "success");
+        await loadQueue();
+      } catch (err) {
+        showToast("Ошибка пакетной обработки: " + err.message, "error");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
       }
     }
 

@@ -1,3 +1,4 @@
+import os
 from typing import Union, Any, Optional
 try:
     from aiogram import Bot
@@ -210,11 +211,18 @@ async def send_video_to_channel(text: str, video_path: str, thumbnail_path: Opti
             inline_keyboard=[[InlineKeyboardButton(text="🔗 Читать оригинал в X", url=tweet_url)]]
         )
 
+    max_caption = getattr(settings, "telegram_max_caption_len", MAX_CAPTION_LENGTH)
     try:
         video = FSInputFile(video_path) if not video_path.startswith("http") else URLInputFile(video_path)
-        thumb = FSInputFile(thumbnail_path) if thumbnail_path and not thumbnail_path.startswith("http") else (URLInputFile(thumbnail_path) if thumbnail_path else None)
+        thumb = None
+        if thumbnail_path:
+            if not thumbnail_path.startswith("http"):
+                if os.path.isfile(thumbnail_path):
+                    thumb = FSInputFile(thumbnail_path)
+            else:
+                thumb = URLInputFile(thumbnail_path)
         
-        if len(text) <= MAX_CAPTION_LENGTH:
+        if len(text) <= max_caption:
             sent_msg = await bot.send_video(
                 chat_id=channel_id,
                 video=video,
@@ -239,7 +247,79 @@ async def send_video_to_channel(text: str, video_path: str, thumbnail_path: Opti
             )
             return getattr(sent_msg, "message_id", None)
     except Exception as e:
-        friendly = get_friendly_telegram_error(e)
-        raise RuntimeError(friendly) from e
+        err_lower = str(e).lower()
+        if "chat not found" in err_lower or "unauthorized" in err_lower or "rights" in err_lower or "kicked" in err_lower:
+            friendly = get_friendly_telegram_error(e)
+            raise RuntimeError(friendly) from e
+
+        # If thumbnail caused failure, retry without thumbnail
+        if thumb is not None:
+            try:
+                print(f"⚠️ Ошибка отправки видео с миниатюрой ({e}), повторная попытка без миниатюры...")
+                if len(text) <= max_caption:
+                    sent_msg = await bot.send_video(
+                        chat_id=channel_id,
+                        video=video,
+                        thumbnail=None,
+                        caption=text,
+                        reply_markup=keyboard,
+                        supports_streaming=True
+                    )
+                    return getattr(sent_msg, "message_id", None)
+                else:
+                    await bot.send_video(
+                        chat_id=channel_id,
+                        video=video,
+                        thumbnail=None,
+                        supports_streaming=True
+                    )
+                    sent_msg = await bot.send_message(
+                        chat_id=channel_id,
+                        text=text,
+                        reply_markup=keyboard,
+                        disable_web_page_preview=True,
+                    )
+                    return getattr(sent_msg, "message_id", None)
+            except Exception as retry_err:
+                e = retry_err
+                err_lower = str(e).lower()
+                if "chat not found" in err_lower or "unauthorized" in err_lower or "rights" in err_lower:
+                    friendly = get_friendly_telegram_error(e)
+                    raise RuntimeError(friendly) from e
+
+        # Fallback if video itself fails (e.g. >50MB limit or format issue): send as photo or text
+        print(f"⚠️ Ошибка отправки видео в Telegram: {e}. Попытка резервной отправки фото/текстом.")
+        try:
+            if thumbnail_path:
+                photo = URLInputFile(thumbnail_path) if thumbnail_path.startswith("http") else (FSInputFile(thumbnail_path) if os.path.isfile(thumbnail_path) else None)
+                if photo:
+                    if len(text) <= max_caption:
+                        sent_msg = await bot.send_photo(
+                            chat_id=channel_id,
+                            photo=photo,
+                            caption=text,
+                            reply_markup=keyboard,
+                        )
+                        return getattr(sent_msg, "message_id", None)
+                    else:
+                        await bot.send_photo(chat_id=channel_id, photo=photo)
+                        sent_msg = await bot.send_message(
+                            chat_id=channel_id,
+                            text=text,
+                            reply_markup=keyboard,
+                            disable_web_page_preview=True,
+                        )
+                        return getattr(sent_msg, "message_id", None)
+            # Text fallback
+            sent_msg = await bot.send_message(
+                chat_id=channel_id,
+                text=text,
+                reply_markup=keyboard,
+                disable_web_page_preview=True,
+            )
+            return getattr(sent_msg, "message_id", None)
+        except Exception as fallback_err:
+            friendly = get_friendly_telegram_error(fallback_err)
+            raise RuntimeError(friendly) from fallback_err
     finally:
         await bot.session.close()

@@ -64,7 +64,7 @@ from src.digest import run_daily_digest
 from src.main import run_pipeline
 from src.version import get_version, get_version_info
 from src.utils.technical_audit import audit_and_prepare_telegram_content
-from src.telegram.sender import send_photo_to_channel, send_post_to_channel
+from src.telegram.sender import send_photo_to_channel, send_post_to_channel, send_video_to_channel
 from src.telegram.moderation_bot import (
     start_moderation_bot,
     stop_moderation_bot,
@@ -191,7 +191,11 @@ import time
 _failed_summaries: Dict[str, float] = {}  # tweet_id -> last_failed_timestamp
 _in_progress_summaries: set = set()
 
-async def _generate_summary_for_tweet(p: Dict[str, Any], force: bool = False) -> Optional[Dict[str, Any]]:
+async def _generate_summary_for_tweet(
+    p: Dict[str, Any],
+    force: bool = False,
+    instruction: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
     """Helper to generate and persist summary for a single tweet dictionary."""
     tweet_id = str(p.get("tweet_id"))
     now = time.time()
@@ -208,24 +212,66 @@ async def _generate_summary_for_tweet(p: Dict[str, Any], force: bool = False) ->
     _in_progress_summaries.add(tweet_id)
     try:
         from src.ai.agents.editor import call_llm
-        from src.db import update_tweet_status_and_score
+        from src.db import update_tweet_status_and_score, get_active_topics
+        from src.utils.technical_audit import audit_and_prepare_telegram_content
 
         print(f"🤖 Генерация русского саммари для поста {tweet_id}...")
         media_urls = p.get("media_urls", [])
-        ai_data = await call_llm(p["text_raw"], media_urls=media_urls)
+        video_data = p.get("video_data")
+        if video_data and isinstance(video_data, dict) and video_data.get("thumbnail"):
+            media_urls = [video_data["thumbnail"]]
+
+        active_topics = await get_active_topics()
+        topic = next((t for t in active_topics if t["id"] == p.get("topic_id")), None)
+
+        ai_data = await call_llm(
+            text=p.get("text_raw", ""),
+            media_urls=media_urls,
+            topic=topic,
+            editor_instruction=instruction if instruction else None,
+            tweet=p,
+        )
         if not ai_data:
             print(f"⚠️ Саммари не сформировано для {tweet_id} (квоты 429 исчерпаны).")
             return None
         if "hashtags" in ai_data:
             ai_data["hashtags"] = normalize_hashtags(ai_data["hashtags"])
+
+        # Technical audit check
+        is_media = bool(media_urls or video_data)
+        audit = audit_and_prepare_telegram_content(
+            title=ai_data.get("title_ru", ""),
+            summary=ai_data.get("summary_ru", ""),
+            takeaways=ai_data.get("takeaways", []),
+            hashtags=ai_data.get("hashtags", []),
+            is_media=is_media,
+            author_handle=p.get("author_handle"),
+            tweet_url=p.get("tweet_url"),
+        )
+        ai_data["title_ru"] = audit["title_ru"]
+        ai_data["summary_ru"] = audit["summary_ru"]
+        ai_data["takeaways"] = audit["takeaways"]
+        ai_data["hashtags"] = audit["hashtags"]
+        ai_data["technical_audit"] = {
+            "is_valid": audit["is_valid"],
+            "char_count": audit["char_count"],
+            "max_limit": audit["max_limit"],
+            "warnings": audit["warnings"],
+        }
+
         p["summary_data"] = ai_data
         p["impact_score"] = ai_data.get("impact_score", 7)
         summary_json_str = json.dumps(ai_data, ensure_ascii=False)
+
+        new_status = p.get("status", "PROCESSED")
+        if getattr(settings, "approval_required", False) and new_status == "PROCESSED":
+            new_status = "PENDING_APPROVAL"
+
         await update_tweet_status_and_score(
             tweet_id=tweet_id,
             score=p.get("viral_score", 0.0),
             is_viral=True,
-            status=p.get("status", "PROCESSED"),
+            status=new_status,
             impact_score=p["impact_score"],
             summary_json=summary_json_str,
         )
@@ -336,13 +382,33 @@ async def handle_publish_now(request: web.Request) -> web.Response:
         "impact_score": tweet.get("impact_score", 7),
     }
 
+    # Extract video if present
+    video_data = tweet.get("video_data")
+    video_local_path = None
+    video_thumbnail = None
+    if video_data and isinstance(video_data, dict):
+        video_local_path = video_data.get("local_path")
+        video_thumbnail = video_data.get("thumbnail")
+
+        # Verify video_local_path exists on disk; if missing, re-download if possible
+        if video_local_path and not os.path.exists(video_local_path):
+            video_local_path = None
+        if not video_local_path and video_data.get("original_url"):
+            try:
+                from src.utils.video_manager import download_video
+                video_local_path = await download_video(tweet_id, video_data["original_url"])
+            except Exception as dl_err:
+                print(f"⚠️ Ошибка загрузки видео перед публикацией {tweet_id}: {dl_err}")
+
     media_urls = tweet.get("media_urls", [])
     selected_idx = summary_data.get("selected_image_index")
     photo_url = None
-    if selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
+    if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
         photo_url = media_urls[selected_idx]
-    elif media_urls and selected_idx == 0:
+    elif not video_local_path and media_urls and (selected_idx == 0 or selected_idx is None):
         photo_url = media_urls[0]
+    elif not video_local_path and not photo_url and video_thumbnail:
+        photo_url = video_thumbnail
 
     if isinstance(summary_data, dict):
         raw_h = (
@@ -354,12 +420,14 @@ async def handle_publish_now(request: web.Request) -> web.Response:
         if raw_h is not None:
             summary_data["hashtags"] = normalize_hashtags(raw_h)
 
-    formatted_text = format_telegram_post(tweet, summary_data, is_photo=bool(photo_url))
+    formatted_text = format_telegram_post(tweet, summary_data, is_photo=bool(photo_url) or bool(video_local_path))
     formatted_text = enforce_hashtags_in_post(formatted_text)
     tweet_url = tweet.get("tweet_url", "https://x.com")
 
     try:
-        if photo_url:
+        if video_local_path:
+            await send_video_to_channel(formatted_text, video_local_path, thumbnail_path=video_thumbnail, tweet_url=tweet_url)
+        elif photo_url:
             await send_photo_to_channel(formatted_text, photo_url, tweet_url)
         else:
             await send_post_to_channel(formatted_text, tweet_url)
@@ -1387,11 +1455,57 @@ async def handle_generate_summary(request: web.Request) -> web.Response:
     if not tweet:
         return web.json_response({"error": "Post not found"}, status=404)
 
-    summary_data = await _generate_summary_for_tweet(tweet, force=True)
+    instruction = None
+    if request.can_read_body:
+        try:
+            data = await request.json()
+            if isinstance(data, dict):
+                instruction = data.get("instruction")
+        except Exception:
+            pass
+
+    summary_data = await _generate_summary_for_tweet(tweet, force=True, instruction=instruction)
     if summary_data:
         return web.json_response({"status": "success", "summary_data": summary_data, "impact_score": tweet.get("impact_score", 7)})
     else:
         return web.json_response({"error": "Failed to generate summary with Gemini (quota or network error). Please try again in a few moments."}, status=500)
+
+
+async def handle_batch_reprocess_queue(request: web.Request) -> web.Response:
+    """Batch re-generates summaries and titles for all queued/unpublished posts."""
+    await init_db()
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    instruction = data.get("instruction", "").strip() if isinstance(data, dict) else ""
+    posts = await get_queued_posts()
+    if not posts:
+        return web.json_response({"status": "success", "total": 0, "reprocessed": 0, "errors": 0, "message": "Очередь пуста"})
+
+    reprocessed = 0
+    errors = 0
+    delay = float(getattr(settings, "ai_request_delay_seconds", 1.5))
+
+    for p in posts:
+        try:
+            res = await _generate_summary_for_tweet(p, force=True, instruction=instruction)
+            if res:
+                reprocessed += 1
+            else:
+                errors += 1
+            await asyncio.sleep(delay)
+        except Exception as e:
+            errors += 1
+            print(f"Error in batch reprocessing post {p.get('tweet_id')}: {e}")
+
+    return web.json_response({
+        "status": "success",
+        "total": len(posts),
+        "reprocessed": reprocessed,
+        "errors": errors,
+    })
 
 
 async def check_twitter_health() -> Dict[str, Any]:
@@ -2060,6 +2174,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/posts/{id}/schedule", handle_update_schedule)
     app.router.add_post("/api/posts/auto_schedule", handle_auto_schedule)
     app.router.add_post("/api/posts/reorder", handle_reorder_queue)
+    app.router.add_post("/api/queue/batch-reprocess", handle_batch_reprocess_queue)
     app.router.add_post("/api/posts/{id}/publish_now", handle_publish_now)
     app.router.add_post("/api/posts/{id}/edit", handle_edit_post)
     app.router.add_post("/api/posts/{id}/reprocess", handle_reprocess_post)

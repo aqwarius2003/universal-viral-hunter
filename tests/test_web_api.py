@@ -235,6 +235,42 @@ async def test_web_publish_now_handlers(tmp_path, monkeypatch, mocker):
         err_data = await resp.json()
         assert "Telegram-канал не найден" in err_data["error"]
 
+        # Test publishing video post
+        fake_video_file = tmp_path / "test_video.mp4"
+        fake_video_file.write_bytes(b"fake mp4 video content")
+        await save_raw_tweets([
+            {
+                "tweet_id": "pub_video_1",
+                "author_handle": "@videotester",
+                "author_name": "Video Tester",
+                "text_raw": "Testing publish now with video",
+                "tweet_url": "https://x.com/tester/status/pub_video_1",
+                "created_at": "2026-09-13T10:00:00+00:00",
+                "likes_count": 200,
+                "reposts_count": 80,
+                "impressions_count": 8000,
+                "media_urls": [],
+                "video_data": {
+                    "local_path": str(fake_video_file),
+                    "thumbnail": "https://pbs.twimg.com/thumb.jpg",
+                    "original_url": "https://video.twimg.com/vid.mp4",
+                },
+            }
+        ])
+        await update_tweet_status_and_score(
+            tweet_id="pub_video_1",
+            score=200.0,
+            is_viral=True,
+            status="PROCESSED",
+            impact_score=9,
+            summary_json=json.dumps({"title_ru": "Тест видео публикации", "summary_ru": "Видео суть"}),
+        )
+        mock_send_video = mocker.patch("src.web.server.send_video_to_channel", return_value=99999)
+        resp = await client.post("/api/posts/pub_video_1/publish_now")
+        assert resp.status == 200
+        mock_send_video.assert_called_once()
+        assert mock_send_video.call_args[0][1] == str(fake_video_file)
+
     finally:
         await client.close()
 
@@ -504,6 +540,17 @@ async def test_version_and_reprocess_api(tmp_path, monkeypatch, mocker):
         sync_res = await resp.json()
         assert sync_res["status"] == "success"
         assert sync_res["synced_count"] >= 1
+
+        # 6. Test POST /api/queue/batch-reprocess
+        mocker.patch(
+            "src.web.server._generate_summary_for_tweet",
+            return_value={"title_ru": "Новый заголовок", "summary_ru": "Суть"}
+        )
+        resp = await client.post("/api/queue/batch-reprocess", json={"instruction": "без штампов"})
+        assert resp.status == 200
+        batch_res = await resp.json()
+        assert batch_res["status"] == "success"
+        assert batch_res["reprocessed"] >= 1
     finally:
         await client.close()
 

@@ -27,7 +27,7 @@ from src.db import (
     update_tweet_metrics,
     update_tweet_status_and_score,
 )
-from src.telegram.sender import send_photo_to_channel, send_post_to_channel
+from src.telegram.sender import send_photo_to_channel, send_post_to_channel, send_video_to_channel
 from src.utils.hashtags import normalize_hashtags, enforce_hashtags_in_post
 
 client: Optional[Any] = None
@@ -500,20 +500,40 @@ async def run_daily_digest(slot_id: Optional[str] = None, is_test: bool = False)
                     "impact_score": 10,
                 }
 
+        video_data = super_tweet.get("video_data")
+        video_local_path = None
+        video_thumbnail = None
+        if video_data and isinstance(video_data, dict):
+            video_local_path = video_data.get("local_path")
+            video_thumbnail = video_data.get("thumbnail")
+
+            if video_local_path and not os.path.exists(video_local_path):
+                video_local_path = None
+            if not video_local_path and video_data.get("original_url"):
+                try:
+                    from src.utils.video_manager import download_video
+                    video_local_path = await download_video(super_tweet["tweet_id"], video_data["original_url"])
+                except Exception as dl_err:
+                    safe_print(f"⚠️ Ошибка загрузки видео супер-твита: {dl_err}")
+
         media_urls = super_tweet.get("media_urls", [])
         selected_idx = summary_data.get("selected_image_index") if summary_data else None
         photo_url = None
-        if selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
+        if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
             photo_url = media_urls[selected_idx]
-        elif media_urls and (selected_idx == 0 or selected_idx is None):
+        elif not video_local_path and media_urls and (selected_idx == 0 or selected_idx is None):
             photo_url = media_urls[0]
+        elif not video_local_path and not photo_url and video_thumbnail:
+            photo_url = video_thumbnail
 
-        formatted_standalone = format_telegram_post(super_tweet, summary_data, is_photo=bool(photo_url))
+        formatted_standalone = format_telegram_post(super_tweet, summary_data, is_photo=bool(photo_url) or bool(video_local_path))
         super_tweet_url = super_tweet.get("tweet_url", "https://x.com")
 
         if not is_test:
             safe_print(f"📤 Отправка супер-вирального поста {super_tweet['tweet_id']} в Telegram...")
-            if photo_url:
+            if video_local_path:
+                await send_video_to_channel(formatted_standalone, video_local_path, thumbnail_path=video_thumbnail, tweet_url=super_tweet_url)
+            elif photo_url:
                 await send_photo_to_channel(formatted_standalone, photo_url, super_tweet_url)
             else:
                 await send_post_to_channel(formatted_standalone, super_tweet_url)

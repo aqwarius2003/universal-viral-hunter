@@ -255,11 +255,24 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
             video_local_path = video_data.get("local_path")
             video_thumbnail = video_data.get("thumbnail")
 
+            if video_local_path and not os.path.exists(video_local_path):
+                video_local_path = None
+            if not video_local_path and video_data.get("original_url"):
+                try:
+                    from src.utils.video_manager import download_video
+                    video_local_path = await download_video(draft["tweet_id"], video_data["original_url"])
+                except Exception as dl_err:
+                    print(f"⚠️ Ошибка загрузки видео перед публикацией {draft['tweet_id']}: {dl_err}")
+
         # Check if a valid image index was selected
         selected_idx = ai_data.get("selected_image_index")
         photo_url = None
         if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
             photo_url = media_urls[selected_idx]
+        elif not video_local_path and media_urls and (selected_idx == 0 or selected_idx is None):
+            photo_url = media_urls[0]
+        elif not video_local_path and not photo_url and video_thumbnail:
+            photo_url = video_thumbnail
 
         # 1. Format the message (compact if photo_url or video_local_path is present)
         formatted_text = format_telegram_post(tweet_data, ai_data, is_photo=bool(photo_url) or bool(video_local_path))
@@ -364,15 +377,37 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
             "impact_score": top_draft.get("impact_score", 7) or 7,
         }
 
+    video_data = top_draft.get("video_data")
+    video_local_path = None
+    video_thumbnail = None
+    if video_data and isinstance(video_data, dict):
+        video_local_path = video_data.get("local_path")
+        video_thumbnail = video_data.get("thumbnail")
+
+        if video_local_path and not os.path.exists(video_local_path):
+            video_local_path = None
+        if not video_local_path and video_data.get("original_url"):
+            try:
+                from src.utils.video_manager import download_video
+                video_local_path = await download_video(top_draft["tweet_id"], video_data["original_url"])
+            except Exception as dl_err:
+                print(f"⚠️ Ошибка загрузки видео перед публикацией {top_draft['tweet_id']}: {dl_err}")
+
     selected_idx = summary_data.get("selected_image_index")
     photo_url = None
-    if selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
+    if not video_local_path and selected_idx is not None and isinstance(selected_idx, int) and 0 <= selected_idx < len(media_urls):
         photo_url = media_urls[selected_idx]
+    elif not video_local_path and media_urls and (selected_idx == 0 or selected_idx is None):
+        photo_url = media_urls[0]
+    elif not video_local_path and not photo_url and video_thumbnail:
+        photo_url = video_thumbnail
 
-    formatted_text = format_telegram_post(top_draft, summary_data, is_photo=bool(photo_url))
+    formatted_text = format_telegram_post(top_draft, summary_data, is_photo=bool(photo_url) or bool(video_local_path))
 
     if not is_test:
-        if photo_url:
+        if video_local_path:
+            await send_video_to_channel(formatted_text, video_local_path, thumbnail_path=video_thumbnail, tweet_url=tweet_url)
+        elif photo_url:
             await send_photo_to_channel(formatted_text, photo_url, tweet_url)
         else:
             await send_post_to_channel(formatted_text, tweet_url)
@@ -393,4 +428,5 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
         "text": formatted_text,
         "tweet_url": tweet_url,
         "photo_url": photo_url,
+        "video_local_path": video_local_path,
     }
