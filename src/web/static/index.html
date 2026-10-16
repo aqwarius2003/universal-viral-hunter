@@ -1711,6 +1711,10 @@
           <p class="section-subtitle">Изменяйте время выхода, порядок публикации или редактируйте текст перед отправкой в Telegram.</p>
         </div>
         <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" onclick="syncTelegramQueue()" title="Отправить карточки модерации всей очереди в Telegram админу">
+            <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"></path><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+            📱 Синхронизировать с Telegram
+          </button>
           <button class="btn btn-secondary" onclick="triggerAutoSchedule()" title="Автоматически распределить время выхода всех постов">
             <svg class="btn-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
             Авторасписание
@@ -4183,6 +4187,21 @@
 
     function clearEditSchedule() {
       document.getElementById("edit-scheduled-at").value = "";
+    }
+
+    async function syncTelegramQueue() {
+      try {
+        showToast("Синхронизация очереди с Telegram ботом...", "info");
+        const res = await fetch("/api/telegram/sync", { method: "POST" });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Отправлено карточек в Telegram: ${data.synced_count} из ${data.total_queued}`, "success");
+        } else {
+          showToast(data.error || "Ошибка синхронизации с Telegram", "error");
+        }
+      } catch (err) {
+        showToast(err.message, "error");
+      }
     }
 
     async function triggerAutoSchedule() {

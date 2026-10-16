@@ -60,3 +60,23 @@ def test_audit_over_limit_adaptive_compaction():
     # MUST strictly fit within Telegram caption limit
     assert res["char_count"] <= TELEGRAM_MAX_CAPTION_LEN
     assert len(res["warnings"]) > 0
+
+
+def test_normalize_channel_id():
+    from src.telegram.sender import normalize_channel_id
+
+    # User personal chat ID (must remain positive int)
+    assert normalize_channel_id("581294821") == 581294821
+    assert normalize_channel_id(581294821) == 581294821
+
+    # Channel ID with 100 prefix and >= 12 digits (missing minus)
+    assert normalize_channel_id("1001234567890") == -1001234567890
+
+    # Negative channel ID
+    assert normalize_channel_id("-1001234567890") == -1001234567890
+    assert normalize_channel_id(-1001234567890) == -1001234567890
+
+    # Public username
+    assert normalize_channel_id("@my_tech_channel") == "@my_tech_channel"
+    assert normalize_channel_id("my_tech_channel") == "@my_tech_channel"
+

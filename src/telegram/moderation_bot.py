@@ -548,3 +548,157 @@ async def process_manual_caption_edit(message: types.Message, state: FSMContext)
         char_count = audit_res.get("char_count", 0)
         max_limit = audit_res.get("max_limit", 1024)
         await message.answer(f"✅ <b>Подпись обновлена и прошла Технический аудит!</b> ({char_count}/{max_limit} симв.)\nПост обновлен в админке. Нажмите «Опубликовать», когда будете готовы.")
+
+
+# ===========================================================================
+# Admin Commands (/start, /sync, /status, /cancel)
+# ===========================================================================
+
+@dp.message(F.text.startswith("/start"))
+async def handle_start_command(message: types.Message):
+    user_id = message.from_user.id
+    current_admin_id = getattr(settings, "telegram_admin_id", None)
+    approval_required = getattr(settings, "approval_required", False)
+
+    is_admin = False
+    if current_admin_id and str(current_admin_id).strip() == str(user_id):
+        is_admin = True
+    elif not current_admin_id:
+        # Automatically bind this user as admin if none is configured
+        settings.telegram_admin_id = str(user_id)
+        settings.approval_required = True
+        try:
+            from src.db import save_system_settings_dual
+            await save_system_settings_dual("telegram_admin_id", str(user_id))
+            await save_system_settings_dual("approval_required", "true")
+        except Exception:
+            pass
+        is_admin = True
+        current_admin_id = str(user_id)
+        approval_required = True
+
+    admin_str = f"<code>{current_admin_id}</code>" if current_admin_id else "<i>не задан</i>"
+    approval_str = "<b>ВКЛЮЧЕНО ✅</b>" if str(approval_required).lower() in ("true", "1") else "<b>ВЫКЛЮЧЕНО ⚪</b>"
+
+    text = (
+        f"👋 <b>Центр модерации Viral Hunter</b>\n\n"
+        f"👤 <b>Ваш Telegram ID:</b> <code>{user_id}</code>\n"
+        f"⚙️ <b>ID администратора в системе:</b> {admin_str}\n"
+        f"🛡 <b>Согласование постов:</b> {approval_str}\n\n"
+    )
+
+    if is_admin:
+        text += (
+            f"✅ <b>Вы авторизованы как Администратор / Главный Редактор!</b>\n\n"
+            f"📋 <b>Команды:</b>\n"
+            f"• <b>/sync</b> — 🔄 <b>Принудительно прислать все посты из очереди</b> на согласование\n"
+            f"• <b>/status</b> — 📊 Проверить состояние очереди и системы\n"
+            f"• <b>/cancel</b> — ❌ Сбросить текущее действие (правку/комментарий)\n\n"
+            f"💡 <i>Отправьте <b>/sync</b> прямо сейчас, чтобы получить все карточки, ожидающие публикации!</i>"
+        )
+    else:
+        text += (
+            f"⚠️ <b>Внимание:</b> ваш ID (<code>{user_id}</code>) не совпадает с администратором системы.\n\n"
+            f"Чтобы получать посты на модерацию:\n"
+            f"1. Откройте веб-панель Viral Hunter\n"
+            f"2. Перейдите в раздел <b>Настройки</b>\n"
+            f"3. Укажите в поле <b>Telegram ID администратора:</b> <code>{user_id}</code>\n"
+            f"4. Включите переключатель <b>«Требовать согласование перед публикацией»</b>\n"
+            f"5. Сохраните настройки и отправьте <b>/sync</b>"
+        )
+
+    await message.reply(text)
+
+
+@dp.message(F.text.startswith("/sync"))
+async def handle_sync_command(message: types.Message):
+    user_id = message.from_user.id
+    current_admin_id = getattr(settings, "telegram_admin_id", None)
+
+    # If not set, bind this user
+    if not current_admin_id:
+        settings.telegram_admin_id = str(user_id)
+        settings.approval_required = True
+        try:
+            from src.db import save_system_settings_dual
+            await save_system_settings_dual("telegram_admin_id", str(user_id))
+            await save_system_settings_dual("approval_required", "true")
+        except Exception:
+            pass
+        current_admin_id = str(user_id)
+
+    if str(current_admin_id).strip() != str(user_id):
+        await message.reply(
+            f"⛔ <b>Доступ ограничен.</b>\n"
+            f"Ваш ID (<code>{user_id}</code>) не совпадает с ID администратора (<code>{current_admin_id}</code>).\n"
+            f"Укажите ваш ID <code>{user_id}</code> в настройках веб-панели."
+        )
+        return
+
+    progress_msg = await message.reply("⏳ <b>Запускаю синхронизацию очереди...</b>\nИщу неопубликованные посты...")
+
+    try:
+        from src.db import get_queued_posts
+        queued = await get_queued_posts()
+        if not queued:
+            await progress_msg.edit_text(
+                "📭 <b>В очереди нет постов для публикации.</b>\n"
+                "Запустите сбор твитов агентом Scout в веб-панели управления, чтобы наполнить очередь свежим контентом."
+            )
+            return
+
+        sent_count = 0
+        failed_count = 0
+        for post in queued:
+            try:
+                msg_id = await send_post_card_to_admin(post)
+                if msg_id:
+                    sent_count += 1
+                else:
+                    failed_count += 1
+                await asyncio.sleep(0.3)
+            except Exception as e:
+                logger.error(f"Error syncing post {post.get('tweet_id')}: {e}")
+                failed_count += 1
+
+        res_text = (
+            f"✅ <b>Синхронизация завершена!</b>\n\n"
+            f"📥 Всего в очереди: <b>{len(queued)}</b>\n"
+            f"📬 Карточек отправлено админу: <b>{sent_count}</b>\n"
+        )
+        if failed_count > 0:
+            res_text += f"⚠️ Ошибок отправки: {failed_count}\n"
+        res_text += f"\nКарточки выше готовы к модерации и публикации."
+        await progress_msg.edit_text(res_text)
+    except Exception as e:
+        logger.error(f"Sync command error: {e}")
+        await progress_msg.edit_text(f"❌ Ошибка синхронизации: {e}")
+
+
+@dp.message(F.text.startswith("/status"))
+async def handle_status_command(message: types.Message):
+    from src.db import get_queued_posts, get_published_posts
+    from src.ai.agents.editor import get_ai_status
+
+    queued = await get_queued_posts()
+    published = await get_published_posts(limit=10)
+    ai_status = get_ai_status()
+
+    ai_state = ai_status.get("status", "unknown")
+    ai_msg = ai_status.get("message", "Нет данных")
+
+    text = (
+        f"📊 <b>Статус системы Viral Hunter</b>\n\n"
+        f"📬 Постов в очереди (ожидают): <b>{len(queued)}</b>\n"
+        f"🚀 Опубликовано (последних): <b>{len(published)}</b>\n"
+        f"🤖 Состояние ИИ: <b>{ai_state.upper()}</b> ({ai_msg})\n"
+        f"🕒 Серверное время: <code>{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>\n\n"
+        f"Отправьте /sync для синхронизации очереди."
+    )
+    await message.reply(text)
+
+
+@dp.message(F.text.startswith("/cancel"))
+async def handle_cancel_command(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.reply("Действие отменено.")

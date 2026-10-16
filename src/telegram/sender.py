@@ -23,7 +23,8 @@ def normalize_channel_id(channel_id: Union[str, int, None]) -> Union[str, int]:
     Normalizes telegram channel identifier:
     - If channel starts with @ or is a negative int (e.g. -100...), leaves as is.
     - If channel is a string name without @ and not starting with -, prepends '@'.
-    - If channel is a pure positive integer (e.g. 1001234567890), converts to -int.
+    - If channel is a pure positive integer starting with 100 and >= 12 digits, converts to -int (channel missing minus).
+    - If channel is a user ID or standard chat ID, returns as positive int.
     """
     if not channel_id:
         raise ValueError("ID Telegram-канала (TELEGRAM_CHANNEL_ID) не задан в конфигурации или настройках.")
@@ -39,7 +40,10 @@ def normalize_channel_id(channel_id: Union[str, int, None]) -> Union[str, int]:
             return raw
     
     if raw.isdigit():
-        return -int(raw)
+        val = int(raw)
+        if len(raw) >= 12 and raw.startswith("100"):
+            return -val
+        return val
         
     if not raw.startswith("@"):
         return f"@{raw}"

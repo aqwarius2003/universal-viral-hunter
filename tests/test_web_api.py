@@ -410,15 +410,20 @@ async def test_version_and_reprocess_api(tmp_path, monkeypatch, mocker):
         "text_raw": "Original tweet text",
         "tweet_url": "https://x.com/tester/status/123",
         "created_at": "2026-10-16T10:00:00Z",
-        "viral_score": 100.0,
-        "status": "QUEUED",
-        "summary_json": json.dumps({
+    }])
+    await update_tweet_status_and_score(
+        tweet_id="test_reprocess_1",
+        score=100.0,
+        is_viral=True,
+        status="PROCESSED",
+        impact_score=8,
+        summary_json=json.dumps({
             "title_ru": "Заголовок",
             "summary_ru": "Суть поста",
             "takeaways": ["Тезис"],
             "hashtags": ["#Тест"],
         })
-    }])
+    )
 
     app = create_app()
     server = TestServer(app)
@@ -459,6 +464,22 @@ async def test_version_and_reprocess_api(tmp_path, monkeypatch, mocker):
         # 3. Test empty instruction error
         resp = await client.post("/api/posts/test_reprocess_1/reprocess", json={"instruction": ""})
         assert resp.status == 400
+
+        # 4. Test POST /api/telegram/sync without admin_id
+        monkeypatch.setattr(settings, "telegram_admin_id", None)
+        resp = await client.post("/api/telegram/sync")
+        assert resp.status == 400
+        sync_err = await resp.json()
+        assert "Telegram Admin ID не настроен" in sync_err["error"]
+
+        # 5. Test POST /api/telegram/sync with admin_id
+        monkeypatch.setattr(settings, "telegram_admin_id", 123456789)
+        mocker.patch("src.web.server.send_post_card_to_admin", return_value=True)
+        resp = await client.post("/api/telegram/sync")
+        assert resp.status == 200
+        sync_res = await resp.json()
+        assert sync_res["status"] == "success"
+        assert sync_res["synced_count"] >= 1
     finally:
         await client.close()
 

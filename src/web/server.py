@@ -479,6 +479,35 @@ async def handle_delete_post(request: web.Request) -> web.Response:
     return web.json_response({"status": "cancelled", "tweet_id": tweet_id})
 
 
+async def handle_sync_telegram(request: web.Request) -> web.Response:
+    """Forces synchronization of all queued unposted posts to the configured Telegram admin."""
+    admin_id = getattr(settings, "telegram_admin_id", None)
+    if not admin_id:
+        return web.json_response(
+            {"error": "Telegram Admin ID не настроен. Напишите боту /start в Telegram или укажите ID в настройках."},
+            status=400,
+        )
+    await init_db()
+    queued = await get_queued_posts()
+    sent_count = 0
+    errors = []
+    for post in queued:
+        try:
+            ok = await send_post_card_to_admin(post)
+            if ok:
+                sent_count += 1
+        except Exception as e:
+            errors.append(f"Post {post.get('id')}: {str(e)}")
+
+    return web.json_response({
+        "status": "success",
+        "total_queued": len(queued),
+        "synced_count": sent_count,
+        "admin_id": str(admin_id),
+        "errors": errors if errors else None,
+    })
+
+
 async def handle_get_version(request: web.Request) -> web.Response:
     """Returns application version information."""
     return web.json_response(get_version_info())
@@ -1966,6 +1995,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/posts/{id}/reprocess", handle_reprocess_post)
     app.router.add_post("/api/posts/{id}/generate_summary", handle_generate_summary)
     app.router.add_delete("/api/posts/{id}", handle_delete_post)
+    app.router.add_post("/api/telegram/sync", handle_sync_telegram)
 
     # Version & Status
     app.router.add_get("/api/version", handle_get_version)
