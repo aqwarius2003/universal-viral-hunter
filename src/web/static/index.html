@@ -2307,6 +2307,18 @@
                     <p class="form-hint">Сколько твитов запрашивать из X.com за один поиск по топику (по умолчанию: 10)</p>
                   </div>
                 </div>
+
+                <div class="form-row">
+                  <div class="form-group" style="flex: 1 1 100%;">
+                    <label class="form-label" for="setting-scout-search-mode">Режим поиска Scout в X.com (Twitter)</label>
+                    <select class="form-control" id="setting-scout-search-mode" name="scout_search_mode">
+                      <option value="BOTH">🔥 Свежие + Топ (Latest & Top - Рекомендуется)</option>
+                      <option value="LATEST">⚡ Только свежие (Latest - новинки по времени)</option>
+                      <option value="TOP">⭐ Только популярные (Top - залайканные)</option>
+                    </select>
+                    <p class="form-hint">В режиме «Свежие + Топ» бот находит как свежайшие ролики прямо из хронологической ленты, так и популярные хиты без дубликатов.</p>
+                  </div>
+                </div>
               </div>
             </details>
 
@@ -4576,6 +4588,7 @@
         if (document.getElementById("setting-max-text-len")) document.getElementById("setting-max-text-len").value = data.telegram_max_text_len ?? 4096;
         if (document.getElementById("setting-max-hashtags")) document.getElementById("setting-max-hashtags").value = data.max_hashtags ?? 5;
         if (document.getElementById("setting-scout-search-count")) document.getElementById("setting-scout-search-count").value = data.scout_search_count ?? 10;
+        if (document.getElementById("setting-scout-search-mode")) document.getElementById("setting-scout-search-mode").value = data.scout_search_mode || "BOTH";
 
         if (document.getElementById("setting-x-queries")) document.getElementById("setting-x-queries").value = data.x_search_queries || "";
         if (document.getElementById("setting-x-relevance")) document.getElementById("setting-x-relevance").value = data.x_relevance_prompt || "";
@@ -4720,6 +4733,9 @@
       if (document.getElementById("setting-scout-search-count")) {
         const val = parseInt(document.getElementById("setting-scout-search-count").value, 10);
         if (!isNaN(val)) payload.scout_search_count = val;
+      }
+      if (document.getElementById("setting-scout-search-mode")) {
+        payload.scout_search_mode = document.getElementById("setting-scout-search-mode").value;
       }
 
       if (document.getElementById("setting-x-queries")) payload.x_search_queries = document.getElementById("setting-x-queries").value;

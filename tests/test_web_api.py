@@ -115,6 +115,7 @@ async def test_web_app_endpoints(tmp_path, monkeypatch):
         assert "quiet_hours_enabled" in settings_data
         assert "quiet_hours_start" in settings_data
         assert "quiet_hours_end" in settings_data
+        assert "scout_search_mode" in settings_data
 
         # 7. Test POST /api/settings
         resp = await client.post("/api/settings", json={
@@ -125,6 +126,7 @@ async def test_web_app_endpoints(tmp_path, monkeypatch):
             "quiet_hours_enabled": True,
             "quiet_hours_start": "23:00",
             "quiet_hours_end": "08:00",
+            "scout_search_mode": "LATEST",
         })
         assert resp.status == 200
         updated_settings = await resp.json()
@@ -133,6 +135,7 @@ async def test_web_app_endpoints(tmp_path, monkeypatch):
         assert updated_settings["settings"]["max_posts_per_run"] == 2
         assert updated_settings["settings"]["daily_digest_time"] == "07:00, 14:00, 21:00"
         assert updated_settings["settings"]["quiet_hours_enabled"] is True
+        assert getattr(settings, "scout_search_mode", None) == "LATEST"
         assert updated_settings["settings"]["quiet_hours_start"] == "23:00"
         assert updated_settings["settings"]["quiet_hours_end"] == "08:00"
 

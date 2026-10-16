@@ -251,6 +251,7 @@ async def init_db() -> None:
             "ai_temperature": "0.3",
             "max_hashtags": "5",
             "scout_search_count": "10",
+            "scout_search_mode": "BOTH",
         }
         for k, v in default_presets.items():
             await db.execute(

@@ -460,25 +460,31 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
             
             search_results = []
             search_count = getattr(settings, "scout_search_count", 10)
-            try:
-                res = await client.search_tweet(query, product="Top", count=search_count)
-                if not res:
-                    res = await client.search_tweet(query, product="Latest", count=search_count)
-                if res:
-                    search_results.extend(res)
-            except Exception as search_err:
-                if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
-                    try:
-                        client.refresh_transaction()
-                        res = await client.search_tweet(query, product="Top", count=search_count)
-                        if not res:
-                            res = await client.search_tweet(query, product="Latest", count=search_count)
-                        if res:
-                            search_results.extend(res)
-                    except Exception as retry_err:
-                        safe_print(f"❌ Ошибка поиска X.com: {retry_err}")
-                else:
-                    safe_print(f"❌ Ошибка поиска X.com: {search_err}")
+            search_mode = str(getattr(settings, "scout_search_mode", "BOTH")).upper()
+
+            async def query_x(product_type: str) -> List[Any]:
+                try:
+                    res = await client.search_tweet(query, product=product_type, count=search_count)
+                    return list(res) if res else []
+                except Exception as err:
+                    if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
+                        try:
+                            client.refresh_transaction()
+                            res = await client.search_tweet(query, product=product_type, count=search_count)
+                            return list(res) if res else []
+                        except Exception as retry_err:
+                            safe_print(f"❌ Ошибка поиска X.com ({product_type}): {retry_err}")
+                    else:
+                        safe_print(f"❌ Ошибка поиска X.com ({product_type}): {err}")
+                    return []
+
+            if search_mode == "LATEST":
+                search_results.extend(await query_x("Latest"))
+            elif search_mode == "TOP":
+                search_results.extend(await query_x("Top"))
+            else:  # "BOTH" (default)
+                search_results.extend(await query_x("Latest"))
+                search_results.extend(await query_x("Top"))
 
             for tweet in search_results:
                 if not tweet:

@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     ai_temperature: float = 0.3
     max_hashtags: int = 5
     scout_search_count: int = 10
+    scout_search_mode: str = "BOTH"  # "BOTH", "LATEST", "TOP"
 
     @property
     def primary_model(self) -> str:

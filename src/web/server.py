@@ -930,6 +930,7 @@ async def handle_get_settings(request: web.Request) -> web.Response:
         "ai_temperature": getattr(settings, "ai_temperature", 0.3),
         "max_hashtags": getattr(settings, "max_hashtags", 5),
         "scout_search_count": getattr(settings, "scout_search_count", 10),
+        "scout_search_mode": getattr(settings, "scout_search_mode", "BOTH"),
     })
 
 
@@ -1245,6 +1246,11 @@ async def handle_update_settings(request: web.Request) -> web.Response:
             db_updates["scout_search_count"] = max(1, min(100, int(data["scout_search_count"])))
         except (ValueError, TypeError):
             pass
+
+    if "scout_search_mode" in data and data["scout_search_mode"] not in (None, ""):
+        mode = str(data["scout_search_mode"]).strip().upper()
+        if mode in ("BOTH", "LATEST", "TOP"):
+            db_updates["scout_search_mode"] = mode
 
     if "video_ttl_days" in data:
         db_updates["video_ttl_days"] = int(data["video_ttl_days"])
