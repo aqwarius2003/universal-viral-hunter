@@ -482,8 +482,9 @@ def cmd_deploy(args: argparse.Namespace) -> None:
         backup_cmd = (
             f"set -e; mkdir -p {remote_dir}/data/backups; "
             f"if [ -d {remote_dir}/data ] && [ \"$(ls -A {remote_dir}/data 2>/dev/null)\" ]; then "
-            f"tar --exclude=backups -czf {remote_dir}/data/backups/data-{stamp}.tar.gz -C {remote_dir}/data . 2>/dev/null || true; "
+            f"tar --exclude=backups --exclude=video-temp -czf {remote_dir}/data/backups/data-{stamp}.tar.gz -C {remote_dir}/data . 2>/dev/null || true; "
             f"echo 'Резервная копия сохранена в data/backups/data-{stamp}.tar.gz'; "
+            f"ls -t {remote_dir}/data/backups/data-*.tar.gz 2>/dev/null | tail -n +3 | xargs -r rm -f; "
             f"fi"
         )
         run_ssh(conn, backup_cmd)
