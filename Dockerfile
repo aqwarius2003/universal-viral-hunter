@@ -9,10 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
     POETRY_VIRTUALENVS_CREATE=false \
     DB_PATH="/app/data/tweets.sqlite"
 
-# Install system dependencies
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Install poetry
@@ -25,9 +24,11 @@ WORKDIR /app
 # Copy dependency files first for caching
 COPY pyproject.toml poetry.lock* /app/
 
-# Install python dependencies and playwright chromium
-RUN poetry install --no-root --no-interaction --no-ansi \
-    && playwright install --with-deps chromium
+# Install python dependencies (without dev) and playwright chromium, then clean apt cache
+RUN poetry install --no-root --without dev --no-interaction --no-ansi \
+    && playwright install --with-deps chromium \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache
 
 # Copy application source code
 COPY . /app/

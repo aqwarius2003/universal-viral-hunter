@@ -27,7 +27,9 @@ def test_format_telegram_post_author_link():
     assert "⚡ 88.5 · ⭐ 9/10" in formatted
 
 
-def test_format_telegram_post_html_escaping():
+def test_format_telegram_post_html_escaping(monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "show_metric_takeaways", True)
     tweet_data = {
         "author_handle": "@dev_team",
         "author_name": "AI <Innovators> & Co",
