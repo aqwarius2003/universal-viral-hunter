@@ -31,14 +31,15 @@ async def init_db() -> None:
                 is_viral BOOLEAN DEFAULT 0,
                 media_urls TEXT DEFAULT '[]',
                 summary_json TEXT,
-                status TEXT CHECK(status IN ('RAW', 'PROCESSED', 'SCHEDULED', 'POSTED', 'FAILED', 'IGNORED', 'IN_DIGEST')) DEFAULT 'RAW',
+                status TEXT CHECK(status IN ('RAW', 'PROCESSED', 'SCHEDULED', 'POSTED', 'FAILED', 'IGNORED', 'IN_DIGEST', 'PROCESSING', 'PENDING_APPROVAL')) DEFAULT 'RAW',
                 scheduled_at TIMESTAMP,
                 queue_order INTEGER DEFAULT 0,
                 posted_at TIMESTAMP,
                 inserted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 digest_id INTEGER,
                 topic_id INTEGER,
-                video_data TEXT
+                video_data TEXT,
+                admin_message_id INTEGER
             );
         """)
         await db.execute("""
@@ -157,6 +158,8 @@ async def init_db() -> None:
                     await db.execute("ALTER TABLE tweets ADD COLUMN topic_id INTEGER REFERENCES topics(id)")
                 if "video_data" not in cols:
                     await db.execute("ALTER TABLE tweets ADD COLUMN video_data TEXT")
+                if "admin_message_id" not in cols:
+                    await db.execute("ALTER TABLE tweets ADD COLUMN admin_message_id INTEGER")
 
         # 2. Create indexes
         await db.execute("CREATE INDEX IF NOT EXISTS idx_viral_status ON tweets(is_viral, status);")
@@ -557,7 +560,7 @@ async def get_queued_posts(strategy: Optional[str] = None) -> List[Dict[str, Any
         async with db.execute(
             f"""
             SELECT * FROM tweets
-            WHERE status IN ('PROCESSED', 'SCHEDULED')
+            WHERE status IN ('PROCESSED', 'SCHEDULED', 'PROCESSING', 'PENDING_APPROVAL')
             ORDER BY 
                 CASE WHEN queue_order > 0 THEN 0 ELSE 1 END,
                 queue_order ASC,
@@ -627,6 +630,39 @@ async def update_post_schedule(tweet_id: str, scheduled_at: Optional[str]) -> No
             WHERE tweet_id = ?
             """,
             (scheduled_at, tweet_id)
+        )
+        await db.commit()
+
+
+async def save_tweet_admin_message_id(tweet_id: str, admin_message_id: Optional[int]) -> None:
+    """Saves or clears the Telegram admin message ID for a post."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE tweets SET admin_message_id = ? WHERE tweet_id = ?",
+            (admin_message_id, tweet_id)
+        )
+        await db.commit()
+
+
+async def get_tweet_admin_message_id(tweet_id: str) -> Optional[int]:
+    """Fetches the Telegram admin message ID for a post."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        async with db.execute(
+            "SELECT admin_message_id FROM tweets WHERE tweet_id = ?",
+            (tweet_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row and row[0] is not None:
+                return int(row[0])
+            return None
+
+
+async def set_tweet_status(tweet_id: str, status: str) -> None:
+    """Updates the status of a post directly."""
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute(
+            "UPDATE tweets SET status = ? WHERE tweet_id = ?",
+            (status, tweet_id)
         )
         await db.commit()
 

@@ -267,6 +267,7 @@ async def test_staging_endpoints_and_limits(tmp_path, monkeypatch, mocker):
     server = TestServer(app)
     client = TestClient(server)
     await client.start_server()
+    monkeypatch.setattr(settings, "max_digest_items", 3)
 
     try:
         # 1. GET /api/staging/tweets
@@ -391,4 +392,74 @@ async def test_settings_new_fields(tmp_path, monkeypatch):
 
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_version_and_reprocess_api(tmp_path, monkeypatch, mocker):
+    """Test /api/version endpoint and /api/posts/{id}/reprocess endpoint."""
+    db_file = tmp_path / "test_version_api.sqlite"
+    monkeypatch.setattr(settings, "db_path", str(db_file))
+    monkeypatch.setattr(settings, "auth_enabled", False)
+    await init_db()
+
+    # Save a test tweet
+    await save_raw_tweets([{
+        "tweet_id": "test_reprocess_1",
+        "author_handle": "@tester",
+        "author_name": "Tester",
+        "text_raw": "Original tweet text",
+        "tweet_url": "https://x.com/tester/status/123",
+        "created_at": "2026-10-16T10:00:00Z",
+        "viral_score": 100.0,
+        "status": "QUEUED",
+        "summary_json": json.dumps({
+            "title_ru": "Заголовок",
+            "summary_ru": "Суть поста",
+            "takeaways": ["Тезис"],
+            "hashtags": ["#Тест"],
+        })
+    }])
+
+    app = create_app()
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+
+    try:
+        # 1. Test GET /api/version
+        resp = await client.get("/api/version")
+        assert resp.status == 200
+        ver_data = await resp.json()
+        assert "version" in ver_data
+        assert "git_commit" in ver_data
+        assert ver_data["version"] == "v2.1.0"
+        assert ver_data["raw_version"] == "2.1.0"
+
+        # 2. Mock reprocess_tweet_with_editor_feedback and test POST /api/posts/{id}/reprocess
+        mocker.patch(
+            "src.web.server.reprocess_tweet_with_editor_feedback",
+            return_value={
+                "tweet_id": "test_reprocess_1",
+                "summary_data": {
+                    "title_ru": "Милый заголовок",
+                    "summary_ru": "Милая суть без жести",
+                    "takeaways": ["Милый тезис"],
+                    "hashtags": ["#Добро"],
+                }
+            }
+        )
+        resp = await client.post("/api/posts/test_reprocess_1/reprocess", json={
+            "instruction": "будь милее, без жести"
+        })
+        assert resp.status == 200
+        rep_data = await resp.json()
+        assert rep_data["status"] == "success"
+        assert rep_data["tweet"]["summary_data"]["title_ru"] == "Милый заголовок"
+
+        # 3. Test empty instruction error
+        resp = await client.post("/api/posts/test_reprocess_1/reprocess", json={"instruction": ""})
+        assert resp.status == 400
+    finally:
+        await client.close()
+
 

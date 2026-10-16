@@ -62,8 +62,16 @@ from src.db import (
 )
 from src.digest import run_daily_digest
 from src.main import run_pipeline
+from src.version import get_version, get_version_info
+from src.utils.technical_audit import audit_and_prepare_telegram_content
 from src.telegram.sender import send_photo_to_channel, send_post_to_channel
-from src.telegram.moderation_bot import start_moderation_bot, stop_moderation_bot
+from src.telegram.moderation_bot import (
+    start_moderation_bot,
+    stop_moderation_bot,
+    delete_admin_moderation_message,
+    send_post_card_to_admin,
+)
+from src.ai.agents.editor import reprocess_tweet_with_editor_feedback
 from src.ai.agents.scout import (
     get_twitter_client,
     load_cookies_from_file,
@@ -357,6 +365,12 @@ async def handle_publish_now(request: web.Request) -> web.Response:
             await send_post_to_channel(formatted_text, tweet_url)
 
         await mark_post_published(tweet_id)
+        # Inbox Zero: delete moderation card from admin's Telegram chat
+        try:
+            await delete_admin_moderation_message(tweet_id)
+        except Exception as e:
+            print(f"Failed to delete admin card for {tweet_id}: {e}")
+
         return web.json_response({"status": "published", "tweet_id": tweet_id})
     except Exception as e:
         error_msg = str(e)
@@ -365,7 +379,7 @@ async def handle_publish_now(request: web.Request) -> web.Response:
 
 
 async def handle_edit_post(request: web.Request) -> web.Response:
-    """Updates post content (title, summary, takeaways, hashtags, selected photo, scheduled_at)."""
+    """Updates post content with strict technical audit and syncs admin card."""
     tweet_id = request.match_info["id"]
     try:
         data = await request.json()
@@ -383,6 +397,24 @@ async def handle_edit_post(request: web.Request) -> web.Response:
         return web.json_response({"error": "Title and summary cannot be empty"}, status=400)
 
     await init_db()
+    tweet = await get_tweet_by_id(tweet_id)
+    if not tweet:
+        return web.json_response({"error": "Post not found"}, status=404)
+
+    # Technical audit before saving
+    is_media = bool(tweet.get("media_urls")) or bool(tweet.get("video_data"))
+    audit_res = audit_and_prepare_telegram_content(
+        title=title_ru,
+        summary=summary_ru,
+        takeaways=takeaways,
+        hashtags=hashtags,
+        is_media=is_media,
+    )
+    title_ru = audit_res["title"]
+    summary_ru = audit_res["summary"]
+    takeaways = audit_res["takeaways"]
+    hashtags = audit_res["hashtags"]
+
     await update_post_content(
         tweet_id=tweet_id,
         title_ru=title_ru,
@@ -397,15 +429,59 @@ async def handle_edit_post(request: web.Request) -> web.Response:
         scheduled_at = data.get("scheduled_at")
         await update_post_schedule(tweet_id, scheduled_at)
 
-    return web.json_response({"status": "updated", "tweet_id": tweet_id})
+    # If post was in Telegram moderation, refresh the card
+    if getattr(settings, "approval_required", False) and getattr(settings, "telegram_admin_id", None):
+        updated_tweet = await get_tweet_by_id(tweet_id)
+        if updated_tweet:
+            try:
+                await send_post_card_to_admin(updated_tweet)
+            except Exception as e:
+                print(f"Error syncing card to admin on edit: {e}")
+
+    return web.json_response({"status": "updated", "tweet_id": tweet_id, "audit": audit_res})
+
+
+async def handle_reprocess_post(request: web.Request) -> web.Response:
+    """Reprocesses a post using AI based on Chief Editor instructions."""
+    tweet_id = request.match_info["id"]
+    try:
+        data = await request.json()
+    except Exception:
+        data = {}
+
+    editor_instruction = data.get("instruction", "").strip()
+    if not editor_instruction:
+        return web.json_response({"error": "Инструкция для ИИ не может быть пустой"}, status=400)
+
+    await init_db()
+    tweet = await get_tweet_by_id(tweet_id)
+    if not tweet:
+        return web.json_response({"error": "Post not found"}, status=404)
+
+    try:
+        updated_tweet = await reprocess_tweet_with_editor_feedback(tweet_id, editor_instruction)
+        if not updated_tweet:
+            return web.json_response({"error": "Не удалось переработать пост через ИИ"}, status=500)
+        return web.json_response({"status": "success", "tweet": updated_tweet})
+    except Exception as e:
+        return web.json_response({"error": f"Ошибка при переработке: {str(e)}"}, status=500)
 
 
 async def handle_delete_post(request: web.Request) -> web.Response:
-    """Cancels and archives a post."""
+    """Cancels and archives a post, removing it from admin Telegram."""
     tweet_id = request.match_info["id"]
     await init_db()
     await cancel_scheduled_post(tweet_id)
+    try:
+        await delete_admin_moderation_message(tweet_id)
+    except Exception as e:
+        print(f"Failed to delete admin card for {tweet_id}: {e}")
     return web.json_response({"status": "cancelled", "tweet_id": tweet_id})
+
+
+async def handle_get_version(request: web.Request) -> web.Response:
+    """Returns application version information."""
+    return web.json_response(get_version_info())
 
 
 from src.ai.agents.editor import get_ai_status, set_ai_status
@@ -1887,10 +1963,12 @@ def create_app() -> web.Application:
     app.router.add_post("/api/posts/reorder", handle_reorder_queue)
     app.router.add_post("/api/posts/{id}/publish_now", handle_publish_now)
     app.router.add_post("/api/posts/{id}/edit", handle_edit_post)
+    app.router.add_post("/api/posts/{id}/reprocess", handle_reprocess_post)
     app.router.add_post("/api/posts/{id}/generate_summary", handle_generate_summary)
     app.router.add_delete("/api/posts/{id}", handle_delete_post)
 
-    # System Status & Settings
+    # Version & Status
+    app.router.add_get("/api/version", handle_get_version)
     app.router.add_get("/api/status", handle_get_status)
     app.router.add_get("/api/settings", handle_get_settings)
     app.router.add_post("/api/settings", handle_update_settings)

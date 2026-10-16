@@ -405,10 +405,64 @@ echo "==> Сервер готов к развертыванию!"
     print_info(f"Теперь можно запустить деплой: python cli.py deploy")
 
 
+def cmd_version(args: argparse.Namespace) -> None:
+    """Shows current version info and optionally bumps version."""
+    from src.version import get_version, get_git_commit
+    ver = get_version()
+    commit = get_git_commit()
+
+    bump = getattr(args, "bump", None)
+    if bump:
+        parts = [int(p) for p in ver.split(".")]
+        while len(parts) < 3:
+            parts.append(0)
+        if bump == "major":
+            parts[0] += 1
+            parts[1] = 0
+            parts[2] = 0
+        elif bump == "minor":
+            parts[1] += 1
+            parts[2] = 0
+        elif bump == "patch":
+            parts[2] += 1
+        new_ver = f"{parts[0]}.{parts[1]}.{parts[2]}"
+        Path("VERSION").write_text(new_ver + "\n", encoding="utf-8")
+        print_success(f"Версия успешно повышена: v{ver} ➔ v{new_ver}")
+        try:
+            subprocess.run(["git", "add", "VERSION"], check=True)
+            subprocess.run(["git", "commit", "-m", f"chore(release): bump version to v{new_ver}"], check=True)
+            subprocess.run(["git", "tag", "-a", f"v{new_ver}", "-m", f"Release v{new_ver}"], check=True)
+            print_success(f"Создан Git-тег: v{new_ver}")
+        except Exception as e:
+            print_warning(f"Git-тег не создан: {e}")
+        return
+
+    print_header("📦 Информация о версии Viral Hunter")
+    print(f"  Версия приложения: {Colors.BOLD}v{ver}{Colors.END}")
+    print(f"  Git коммит:         {Colors.CYAN}{commit}{Colors.END}")
+    try:
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], text=True).strip()
+        print(f"  Текущая ветка:      {branch}")
+    except Exception:
+        pass
+
+
 def cmd_deploy(args: argparse.Namespace) -> None:
     """Packages project, backups remote database, uploads, rebuilds Docker container and checks health."""
     conn = resolve_connection(args)
-    print_header(f"Развертывание на сервер: {conn['target']}")
+    from src.version import get_version, get_git_commit
+    ver = get_version()
+    commit = get_git_commit()
+    print_header(f"Развертывание на сервер: {conn['target']} | Релиз: v{ver} ({commit})")
+
+    # Ensure git release tag exists for reproducibility
+    try:
+        tag_check = subprocess.run(["git", "tag", "-l", f"v{ver}"], capture_output=True, text=True)
+        if not tag_check.stdout.strip():
+            subprocess.run(["git", "tag", "-a", f"v{ver}", "-m", f"Deploy release v{ver}"], stderr=subprocess.DEVNULL)
+            print_info(f"Создан релизный Git-тег: v{ver}")
+    except Exception:
+        pass
 
     temp_archive = Path(tempfile.gettempdir()) / "viral-hunter-deploy.tar.gz"
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -416,7 +470,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
 
     try:
         # Step 1: Package local code
-        print_info("[1/5] Упаковка исходного кода проекта...")
+        print_info(f"[1/5] Упаковка исходного кода проекта (версия v{ver})...")
         if temp_archive.exists():
             temp_archive.unlink()
         create_project_archive(temp_archive)
@@ -661,6 +715,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp_cfg = subparsers.add_parser("config", help="Показать или сбросить сохраненные настройки подключения")
     sp_cfg.add_argument("--reset", action="store_true", help="Сбросить сохраненную конфигурацию")
 
+    # version
+    sp_ver = subparsers.add_parser("version", help="Показать текущую версию проекта или повысить ее")
+    sp_ver.add_argument("--bump", choices=["patch", "minor", "major"], help="Автоматически повысить версию и создать Git-тег")
+
     return parser
 
 
@@ -687,6 +745,7 @@ def main() -> None:
         "stop": cmd_stop,
         "backup": cmd_backup,
         "config": cmd_config,
+        "version": cmd_version,
     }
 
     handler = commands.get(args.command)

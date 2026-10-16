@@ -23,9 +23,7 @@ except ImportError:
     try:
         from twifork import Client
     except ImportError:
-        raise ImportError(
-            "Neither 'twikit' nor 'twifork' is installed. Please install 'twifork>=2.4.0'."
-        )
+        Client = None
 
 from src.ai.agents.state import AgentState
 from src.config import settings

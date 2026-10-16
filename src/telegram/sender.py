@@ -1,8 +1,17 @@
 from typing import Union, Any, Optional
-from aiogram import Bot
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, URLInputFile
+try:
+    from aiogram import Bot
+    from aiogram.client.default import DefaultBotProperties
+    from aiogram.enums import ParseMode
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, URLInputFile, FSInputFile
+except ImportError:
+    Bot = None
+    DefaultBotProperties = None
+    ParseMode = None
+    InlineKeyboardMarkup = None
+    InlineKeyboardButton = None
+    URLInputFile = None
+    FSInputFile = None
 from src.config import settings
 from src.utils.hashtags import enforce_hashtags_in_post
 
@@ -173,7 +182,6 @@ async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[s
     finally:
         await bot.session.close()
 
-from aiogram.types import FSInputFile
 
 async def send_video_to_channel(text: str, video_path: str, thumbnail_path: Optional[str] = None, tweet_url: Optional[str] = None, channel_id_override: Optional[str] = None, reply_markup_override: Optional[InlineKeyboardMarkup] = None) -> Optional[int]:
     """

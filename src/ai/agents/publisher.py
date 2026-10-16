@@ -11,7 +11,8 @@ from src.utils.hashtags import (
     extract_trailing_tags_from_summary,
 )
 from src.telegram.sender import send_post_to_channel, send_photo_to_channel, send_video_to_channel
-from src.telegram.moderation_bot import build_admin_keyboard
+from src.telegram.moderation_bot import build_admin_keyboard, delete_admin_moderation_message
+from src.db import save_tweet_admin_message_id
 
 
 def format_compact_num(val: Any) -> str:
@@ -265,8 +266,9 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
         if is_approval and admin_id:
             reply_markup = build_admin_keyboard(draft["tweet_id"], tweet_url)
 
+        sent_msg_id = None
         if video_local_path:
-            await send_video_to_channel(
+            sent_msg_id = await send_video_to_channel(
                 formatted_text, 
                 video_local_path, 
                 thumbnail_path=video_thumbnail, 
@@ -275,9 +277,15 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
                 reply_markup_override=reply_markup
             )
         elif photo_url:
-            await send_photo_to_channel(formatted_text, photo_url, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
+            sent_msg_id = await send_photo_to_channel(formatted_text, photo_url, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
         else:
-            await send_post_to_channel(formatted_text, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
+            sent_msg_id = await send_post_to_channel(formatted_text, tweet_url, channel_id_override=target_channel, reply_markup_override=reply_markup)
+
+        if is_approval and admin_id and sent_msg_id:
+            await save_tweet_admin_message_id(draft["tweet_id"], sent_msg_id)
+        elif not is_approval:
+            # If directly published to channel, ensure any previous admin moderation card is deleted
+            await delete_admin_moderation_message(draft["tweet_id"])
 
         # 3. Update DB status. If moderation, mark as STAGING/PENDING, else POSTED
         new_status = "PENDING_APPROVAL" if (is_approval and admin_id) else "POSTED"

@@ -6,8 +6,12 @@ import json
 import sys
 from typing import Any, Dict, List, Optional
 
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+except ImportError:
+    genai = None
+    types = None
 
 from src.ai.agents.publisher import format_telegram_post
 from src.ai.agents.scout import refresh_tweet_metrics, safe_print
@@ -26,10 +30,10 @@ from src.db import (
 from src.telegram.sender import send_photo_to_channel, send_post_to_channel
 from src.utils.hashtags import normalize_hashtags, enforce_hashtags_in_post
 
-client: Optional[genai.Client] = None
+client: Optional[Any] = None
 
 
-def get_client() -> genai.Client:
+def get_client() -> Any:
     global client
     if client is None:
         if not settings.ai_api_key or settings.ai_api_key.startswith("your_"):

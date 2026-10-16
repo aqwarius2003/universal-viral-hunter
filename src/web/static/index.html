@@ -1623,7 +1623,7 @@
             </svg>
           </div>
           <div class="logo-text">
-            <h1>Viral Hunter</h1>
+            <h1>Viral Hunter <span id="app-version-badge" style="font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; vertical-align: middle; margin-left: 6px; font-weight: 500;">v2.1.0</span></h1>
             <p>Центр управления публикациями Telegram</p>
           </div>
         </div>
@@ -2255,38 +2255,13 @@
               </div>
             </div>
 
-            <!-- Dynamic Search Queries & AI Prompts -->
-            <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
-              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Поисковые запросы X.com и Промпты ИИ</h4>
-              <div class="form-group">
-                <label class="form-label" for="setting-x-queries">Поисковые запросы Twitter (X) (каждый с новой строки)</label>
-                <textarea class="form-control" id="setting-x-queries" name="x_search_queries" rows="3" placeholder="min_faves:50, lang:en"></textarea>
-                <p class="form-hint">Каждый запрос будет обработан агентом Scout</p>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="setting-x-relevance">Промпт оценки релевантности (Scout Gemini)</label>
-                <textarea class="form-control" id="setting-x-relevance" name="x_relevance_prompt" rows="2" placeholder="Оцени релевантность твита..."></textarea>
-                <p class="form-hint">Инструкция для фильтрации нерелевантного шума</p>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="setting-editor-sys-prompt">Системный промпт редактора (Editor System Prompt)</label>
-                <textarea class="form-control" id="setting-editor-sys-prompt" name="editor_system_prompt" rows="3"></textarea>
-                <p class="form-hint">Базовые правила тональности и структуры JSON ответа</p>
-              </div>
-              <div class="form-group">
-                <label class="form-label" for="setting-editor-template">Шаблон промпта суммаризации (Editor Template)</label>
-                <textarea class="form-control" id="setting-editor-template" name="editor_prompt_template" rows="3"></textarea>
-                <p class="form-hint">Переменные подстановки: {text}, {author}, {date}, {media_count}</p>
-              </div>
-            </div>
-
             <!-- Multi-Topics Management -->
             <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-                <h4 style="margin:0; font-size: 0.95rem; color: #fff;">📂 Мультитопики (Тематические ленты)</h4>
-                <button type="button" class="btn btn-sm btn-primary" onclick="openTopicModal()">+ Добавить топик</button>
+                <h4 style="margin:0; font-size: 0.95rem; color: #fff;">📺 Тематические каналы и потоки (Мульти-топики)</h4>
+                <button type="button" class="btn btn-sm btn-primary" onclick="openTopicModal()">+ Добавить поток / канал</button>
               </div>
-              <p class="form-hint" style="margin-bottom:12px;">Настройте отдельные тематики со своими поисковыми запросами, фильтром медиа (видео/фото) и персональными Telegram-каналами.</p>
+              <p class="form-hint" style="margin-bottom:12px;">Настройте отдельные потоки контента со своими поисковыми запросами, промптами, фильтром медиа (видео/фото) и персональными Telegram-каналами для универсальной работы бота.</p>
               <div id="topics-list-container" style="display:flex; flex-direction:column; gap:8px;">
                 <div style="font-size:0.85rem; color:var(--tg-text-muted);">Загрузка топиков...</div>
               </div>
@@ -2556,7 +2531,27 @@
       <div class="modal-body">
         <form id="edit-post-form">
           <input type="hidden" id="edit-tweet-id">
-          
+
+          <!-- Chief Editor AI Rework Block -->
+          <div style="margin-bottom: 16px; padding: 12px; background: rgba(147, 51, 234, 0.1); border: 1px solid rgba(147, 51, 234, 0.35); border-radius: 8px;">
+            <label class="form-label" for="edit-ai-instruction" style="color: #c084fc; font-weight: 600; display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+              <span>✨ Указания Главному Редактору (ИИ переработка)</span>
+            </label>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" class="form-control" id="edit-ai-instruction" placeholder="Например: 'будь милее', 'без жести', 'сократи до 3 строк'" style="flex: 1;">
+              <button type="button" class="btn" id="btn-reprocess-ai" onclick="reprocessPostWithAI()" style="white-space: nowrap; background: linear-gradient(135deg, #7c3aed, #4f46e5); color: #fff; border: none; font-weight: 500;">
+                ✨ Переделать ИИ
+              </button>
+            </div>
+            <p class="form-hint" style="margin-top: 4px; font-size: 0.75rem; color: #a855f7;">ИИ перепишет текст с учетом ваших правок и сразу применит Технический аудит.</p>
+          </div>
+
+          <!-- Telegram Technical Audit Live Indicator -->
+          <div id="edit-audit-banner" style="margin-bottom: 14px; padding: 8px 12px; border-radius: 6px; font-size: 0.82rem; display: flex; justify-content: space-between; align-items: center; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); color: #93c5fd;">
+            <span>📐 Технический аудит Telegram:</span>
+            <span id="edit-char-counter" style="font-weight: 600;">0 / 1024 симв.</span>
+          </div>
+
           <div class="form-group">
             <label class="form-label" for="edit-scheduled-at">Дата и время публикации</label>
             <div class="schedule-input-group">
@@ -2900,8 +2895,25 @@
     let lockoutTimer = null;
 
     document.addEventListener("DOMContentLoaded", () => {
+      loadAppVersion();
       checkAuthAndInit();
     });
+
+    async function loadAppVersion() {
+      try {
+        const res = await fetch("/api/version");
+        if (res.ok) {
+          const data = await res.json();
+          const badge = document.getElementById("app-version-badge");
+          if (badge) {
+            badge.textContent = `v${data.version}`;
+            badge.title = `Commit: ${data.git_commit}`;
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load app version:", err);
+      }
+    }
 
     async function checkAuthAndInit() {
       try {
@@ -3858,9 +3870,16 @@
           const author = escapeHtml(cleanHandle ? `@${cleanHandle}` : (p.author_name || "Unknown"));
           const viralScore = Math.round(Number(p.viral_score || 0));
           const formattedScheduledDisplay = formatDisplayDateTime(p.scheduled_at);
-          const statusBadgeHtml = formattedScheduledDisplay
-            ? `<span class="status-badge status-scheduled" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;">${formattedScheduledDisplay}</span>`
-            : `<span class="status-badge status-processed" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;">Не запланирован</span>`;
+          let statusBadgeHtml = '';
+          if (p.status === 'PROCESSING') {
+            statusBadgeHtml = `<span class="status-badge" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc; cursor: default;">⏳ В обработке ИИ...</span>`;
+          } else if (p.status === 'PENDING_APPROVAL') {
+            statusBadgeHtml = `<span class="status-badge" onclick="openEditModal('${p.tweet_id}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fcd34d; cursor: pointer;" title="Ожидает согласования в Telegram">⏱ На согласовании</span>`;
+          } else if (formattedScheduledDisplay) {
+            statusBadgeHtml = `<span class="status-badge status-scheduled" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;">${formattedScheduledDisplay}</span>`;
+          } else {
+            statusBadgeHtml = `<span class="status-badge status-processed" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;">Не запланирован</span>`;
+          }
 
           return `
             <div class="post-card" style="display:flex; align-items:center; justify-content:space-between; padding: 12px 16px; gap: 16px; border-radius: 8px;">
@@ -3919,9 +3938,16 @@
         const scheduledVal = formatDateTimeLocal(p.scheduled_at);
         const formattedScheduledDisplay = formatDisplayDateTime(p.scheduled_at);
 
-        const statusBadgeHtml = formattedScheduledDisplay
-          ? `<span class="status-badge status-scheduled" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;" title="Нажмите, чтобы изменить время публикации">${formattedScheduledDisplay}</span>`
-          : `<span class="status-badge status-processed" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;" title="Нажмите, чтобы назначить время публикации">Не запланирован</span>`;
+        let statusBadgeHtml = '';
+        if (p.status === 'PROCESSING') {
+          statusBadgeHtml = `<span class="status-badge" style="background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.5); color: #c084fc; cursor: default;">⏳ В обработке ИИ...</span>`;
+        } else if (p.status === 'PENDING_APPROVAL') {
+          statusBadgeHtml = `<span class="status-badge" onclick="openEditModal('${p.tweet_id}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.5); color: #fcd34d; cursor: pointer;" title="Ожидает согласования в Telegram">⏱ На согласовании</span>`;
+        } else if (formattedScheduledDisplay) {
+          statusBadgeHtml = `<span class="status-badge status-scheduled" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;" title="Нажмите, чтобы изменить время публикации">${formattedScheduledDisplay}</span>`;
+        } else {
+          statusBadgeHtml = `<span class="status-badge status-processed" onclick="openEditModal('${p.tweet_id}', true)" style="cursor:pointer;" title="Нажмите, чтобы назначить время публикации">Не запланирован</span>`;
+        }
 
         const authorLineHtml = cleanHandle && cleanHandle.toLowerCase() !== "unknown"
           ? `<div class="author-line"><svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" style="vertical-align: -1px; margin-right: 4px;"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg><a href="${xProfileUrl}" target="_blank" rel="noopener">${authorDisplay}</a></div>`
@@ -4250,6 +4276,82 @@
     }
 
     // EDIT MODAL
+    function updateAuditCounter() {
+      const title = (document.getElementById("edit-title").value || "").trim();
+      const summary = (document.getElementById("edit-summary").value || "").trim();
+      const takeaways = (document.getElementById("edit-takeaways").value || "").split("\n").map(t => t.trim()).filter(Boolean);
+      const hashtags = (document.getElementById("edit-hashtags").value || "").trim();
+      
+      const isMedia = currentEditingPost && ((currentEditingPost.media_urls && currentEditingPost.media_urls.length > 0) || Boolean(currentEditingPost.video_data));
+      const maxLimit = isMedia ? 1024 : 4096;
+
+      // Estimate formatted telegram post length
+      let text = `<b>${title}</b>\n\n${summary}`;
+      if (takeaways.length > 0) {
+        text += `\n\n📌 <b>Главное:</b>\n` + takeaways.map(t => `• ${t}`).join("\n");
+      }
+      if (hashtags) {
+        text += `\n\n${hashtags}`;
+      }
+
+      const len = text.length;
+      const counterEl = document.getElementById("edit-char-counter");
+      const bannerEl = document.getElementById("edit-audit-banner");
+      if (!counterEl || !bannerEl) return;
+
+      if (len <= maxLimit) {
+        counterEl.innerHTML = `✅ ${len} / ${maxLimit} симв. (в норме)`;
+        bannerEl.style.background = "rgba(16, 185, 129, 0.1)";
+        bannerEl.style.borderColor = "rgba(16, 185, 129, 0.3)";
+        bannerEl.style.color = "#6ee7b7";
+      } else {
+        counterEl.innerHTML = `⚠️ ${len} / ${maxLimit} симв. (авто-сжатие при сохранении)`;
+        bannerEl.style.background = "rgba(245, 158, 11, 0.15)";
+        bannerEl.style.borderColor = "rgba(245, 158, 11, 0.4)";
+        bannerEl.style.color = "#fcd34d";
+      }
+    }
+
+    async function reprocessPostWithAI() {
+      const tweetId = document.getElementById("edit-tweet-id").value;
+      const instruction = (document.getElementById("edit-ai-instruction").value || "").trim();
+      if (!instruction) {
+        showToast("Введите указания для ИИ (например: 'будь милее', 'без жести')", "warning");
+        return;
+      }
+      const btn = document.getElementById("btn-reprocess-ai");
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;margin-right:4px;">⏳</span> ИИ переделывает...`;
+
+      try {
+        const res = await fetch(`/api/posts/${tweetId}/reprocess`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ instruction })
+        });
+        const data = await res.json();
+        if (res.ok && data.tweet) {
+          showToast("✨ ИИ успешно переработал текст с учетом ваших правок!", "success");
+          const s = data.tweet.summary_data || {};
+          document.getElementById("edit-title").value = s.title_ru || "";
+          document.getElementById("edit-summary").value = s.summary_ru || "";
+          document.getElementById("edit-takeaways").value = (s.takeaways || []).join("\n");
+          document.getElementById("edit-hashtags").value = normalizeHashtags(s.hashtags).join(" ");
+          document.getElementById("edit-ai-instruction").value = "";
+          updateAuditCounter();
+          loadQueue();
+        } else {
+          showToast("Ошибка ИИ: " + (data.error || "Неизвестная ошибка"), "error");
+        }
+      } catch (err) {
+        showToast("Ошибка сети: " + err.message, "error");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+
     function openEditModal(tweetId, focusSchedule = false) {
       currentEditingPost = queueData.find(p => p.tweet_id === tweetId);
       if (!currentEditingPost) return;
@@ -4261,6 +4363,18 @@
       document.getElementById("edit-summary").value = s.summary_ru || currentEditingPost.text_raw || "";
       document.getElementById("edit-takeaways").value = (s.takeaways || []).join("\n");
       document.getElementById("edit-hashtags").value = normalizeHashtags(s.hashtags).join(" ");
+
+      const aiInput = document.getElementById("edit-ai-instruction");
+      if (aiInput) aiInput.value = "";
+
+      ["edit-title", "edit-summary", "edit-takeaways", "edit-hashtags"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && !el._hasAuditListener) {
+          el.addEventListener("input", updateAuditCounter);
+          el._hasAuditListener = true;
+        }
+      });
+      updateAuditCounter();
 
       const mediaUrls = currentEditingPost.media_urls || [];
       const imageGroup = document.getElementById("image-selection-group");

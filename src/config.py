@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     ai_fallback_model_name: str = "gemini-3.1-flash-lite"
     telegram_bot_token: Optional[str] = None
     telegram_channel_id: Optional[str] = None
+    telegram_admin_id: Optional[str] = None
+    approval_required: bool = False
     min_viral_score: float = 75.0
     super_viral_threshold: float = 100.0
     db_path: str = "tweets.sqlite"

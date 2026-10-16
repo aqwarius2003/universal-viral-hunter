@@ -5,12 +5,13 @@ import re
 import time
 from typing import Any, Dict, List, Optional, Union
 import aiohttp
-from google import genai
-from google.genai import types
-
 try:
+    from google import genai
+    from google.genai import types
     from google.genai.errors import ClientError, APIError
 except ImportError:
+    genai = None
+    types = None
     class ClientError(Exception):
         code: int = 429
     class APIError(Exception):
@@ -22,13 +23,14 @@ from src.ai.schema import TweetSummary, ImageSelection
 from src.config import settings
 from src.db import update_tweet_status_and_score, get_active_topics
 from src.utils.hashtags import normalize_hashtags
+from src.utils.technical_audit import audit_and_prepare_telegram_content
 
 logger = logging.getLogger("viral-hunter.editor")
 
-client: Optional[genai.Client] = None
+client: Optional[Any] = None
 
 
-def get_client() -> genai.Client:
+def get_client() -> Any:
     global client
     if client is None:
         if not settings.ai_api_key or settings.ai_api_key.startswith("your_"):
@@ -197,6 +199,7 @@ async def call_llm(
     media_urls: Optional[List[str]] = None,
     max_retries: int = 1,
     topic: Optional[Dict[str, Any]] = None,
+    editor_instruction: Optional[str] = None,
     **kwargs: Any,
 ) -> Optional[dict]:
     """
@@ -266,6 +269,14 @@ async def call_llm(
     except Exception:
         prompt_text = f"Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}"
 
+    if editor_instruction and str(editor_instruction).strip():
+        instruction_block = (
+            f"\n\n🔥 КРИТИЧЕСКИ ВАЖНОЕ УКАЗАНИЕ ГЛАВНОГО РЕДАКТОРА:\n"
+            f"«{str(editor_instruction).strip()}»\n"
+            f"Обязательно строго перепиши заголовок, суть и тональность с учетом этого требования!"
+        )
+        prompt_text += instruction_block
+
     contents = [prompt_text]
     
     # If media contains exactly one image (or thumbnail), and no selection was needed, pass it to the text model for multimodal context
@@ -303,6 +314,29 @@ async def call_llm(
             parsed_dict["hashtags"] = normalize_hashtags(parsed_dict["hashtags"])
         parsed_dict["selected_image_index"] = selected_img_idx
         parsed_dict["image_reason"] = selected_img_reason
+
+        # Run strict Technical Audit BEFORE returning
+        is_media = bool(media_urls or (tweet and tweet.get("video_data")))
+        audit = audit_and_prepare_telegram_content(
+            title=parsed_dict.get("title_ru", ""),
+            summary=parsed_dict.get("summary_ru", ""),
+            takeaways=parsed_dict.get("takeaways", []),
+            hashtags=parsed_dict.get("hashtags", []),
+            is_media=is_media,
+            author_handle=tweet.get("author_handle") if tweet else None,
+            tweet_url=tweet.get("tweet_url") if tweet else None,
+        )
+        parsed_dict["title_ru"] = audit["title_ru"]
+        parsed_dict["summary_ru"] = audit["summary_ru"]
+        parsed_dict["takeaways"] = audit["takeaways"]
+        parsed_dict["hashtags"] = audit["hashtags"]
+        parsed_dict["formatted_text"] = audit["formatted_text"]
+        parsed_dict["technical_audit"] = {
+            "is_valid": audit["is_valid"],
+            "char_count": audit["char_count"],
+            "max_limit": audit["max_limit"],
+            "warnings": audit["warnings"],
+        }
         set_ai_status("ok", f"Готов к работе ({primary_model})")
         return parsed_dict
     except ClientError as e:
@@ -343,6 +377,29 @@ async def call_llm(
                 parsed_dict["hashtags"] = normalize_hashtags(parsed_dict["hashtags"])
             parsed_dict["selected_image_index"] = selected_img_idx
             parsed_dict["image_reason"] = selected_img_reason
+
+            # Run strict Technical Audit BEFORE returning
+            is_media = bool(media_urls or (tweet and tweet.get("video_data")))
+            audit = audit_and_prepare_telegram_content(
+                title=parsed_dict.get("title_ru", ""),
+                summary=parsed_dict.get("summary_ru", ""),
+                takeaways=parsed_dict.get("takeaways", []),
+                hashtags=parsed_dict.get("hashtags", []),
+                is_media=is_media,
+                author_handle=tweet.get("author_handle") if tweet else None,
+                tweet_url=tweet.get("tweet_url") if tweet else None,
+            )
+            parsed_dict["title_ru"] = audit["title_ru"]
+            parsed_dict["summary_ru"] = audit["summary_ru"]
+            parsed_dict["takeaways"] = audit["takeaways"]
+            parsed_dict["hashtags"] = audit["hashtags"]
+            parsed_dict["formatted_text"] = audit["formatted_text"]
+            parsed_dict["technical_audit"] = {
+                "is_valid": audit["is_valid"],
+                "char_count": audit["char_count"],
+                "max_limit": audit["max_limit"],
+                "warnings": audit["warnings"],
+            }
             set_ai_status("ok", f"Готов к работе ({fallback_model})")
             return parsed_dict
         except ClientError as e:
@@ -457,3 +514,83 @@ async def editor_node(state: AgentState) -> Dict[str, Any]:
     )
 
     return {"draft_posts": all_drafts}
+
+
+async def reprocess_tweet_with_editor_feedback(
+    tweet_id: str,
+    feedback: str,
+) -> Dict[str, Any]:
+    """
+    Reworks an existing tweet with chief editor instructions (e.g. 'будь милее', 'без жести').
+    Sets status to 'PROCESSING' during work, executes Technical Audit BEFORE saving to DB,
+    and returns audited data with status 'PENDING_APPROVAL' / 'PROCESSED'.
+    """
+    from src.db import get_tweet_by_id, set_tweet_status, update_tweet_status_and_score, get_active_topics
+
+    # 1. Mark as PROCESSING in DB so UI immediately reflects processing state
+    await set_tweet_status(tweet_id, "PROCESSING")
+
+    tweet = await get_tweet_by_id(tweet_id)
+    if not tweet:
+        raise ValueError(f"Твит {tweet_id} не найден в базе данных.")
+
+    media_urls = tweet.get("media_urls", [])
+    video_data = tweet.get("video_data")
+    if video_data and isinstance(video_data, dict) and video_data.get("thumbnail"):
+        media_urls = [video_data["thumbnail"]]
+
+    active_topics = await get_active_topics()
+    topic = next((t for t in active_topics if t["id"] == tweet.get("topic_id")), None)
+
+    # 2. Call LLM with editor instruction (technical audit runs automatically inside call_llm)
+    ai_data = await call_llm(
+        text=tweet.get("text_raw", ""),
+        media_urls=media_urls,
+        topic=topic,
+        editor_instruction=feedback,
+        tweet=tweet,
+    )
+    if not ai_data:
+        # Revert status on quota failure
+        await set_tweet_status(tweet_id, "PROCESSED")
+        raise RuntimeError("ИИ временно недоступен (лимит квот исчерпан). Попробуйте позже.")
+
+    # 3. Technical Audit is guaranteed, re-verify
+    is_media = bool(media_urls or video_data)
+    audit_res = audit_and_prepare_telegram_content(
+        title=ai_data.get("title_ru", ""),
+        summary=ai_data.get("summary_ru", ""),
+        takeaways=ai_data.get("takeaways", []),
+        hashtags=ai_data.get("hashtags", []),
+        is_media=is_media,
+        author_handle=tweet.get("author_handle"),
+        tweet_url=tweet.get("tweet_url"),
+    )
+    ai_data["title_ru"] = audit_res["title_ru"]
+    ai_data["summary_ru"] = audit_res["summary_ru"]
+    ai_data["takeaways"] = audit_res["takeaways"]
+    ai_data["hashtags"] = audit_res["hashtags"]
+    ai_data["technical_audit"] = {
+        "is_valid": audit_res["is_valid"],
+        "char_count": audit_res["char_count"],
+        "max_limit": audit_res["max_limit"],
+        "warnings": audit_res["warnings"],
+    }
+
+    # 4. Save to DB with PENDING_APPROVAL status (or PROCESSED)
+    new_status = "PENDING_APPROVAL" if getattr(settings, "approval_required", False) else "PROCESSED"
+    await update_tweet_status_and_score(
+        tweet_id=tweet_id,
+        score=tweet.get("viral_score", 0.0),
+        is_viral=True,
+        status=new_status,
+        impact_score=ai_data.get("impact_score", 0),
+        summary_json=json.dumps(ai_data, ensure_ascii=False),
+    )
+
+    return {
+        "tweet_id": tweet_id,
+        "status": new_status,
+        "ai_data": ai_data,
+        "audit": audit_res,
+    }
