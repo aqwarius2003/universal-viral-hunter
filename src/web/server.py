@@ -1314,22 +1314,36 @@ async def handle_update_settings(request: web.Request) -> web.Response:
     })
 
 
+def update_pipeline_runtime(
+    state: str,
+    tweets_found: int = 0,
+    viral_found: int = 0,
+    error_message: Optional[str] = None,
+) -> None:
+    """Updates runtime state of the pipeline so dashboard UI status reflects reality."""
+    pipeline_runtime["state"] = state
+    pipeline_runtime["tweets_found"] = tweets_found
+    pipeline_runtime["viral_found"] = viral_found
+    pipeline_runtime["error_message"] = error_message
+    if state == "running":
+        pipeline_runtime["started_at"] = datetime.now(timezone.utc).isoformat()
+        pipeline_runtime["finished_at"] = None
+    elif state in ("success", "error", "idle"):
+        pipeline_runtime["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
 async def _safe_run_pipeline() -> None:
-    pipeline_runtime["state"] = "running"
-    pipeline_runtime["started_at"] = datetime.now(timezone.utc).isoformat()
-    pipeline_runtime["finished_at"] = None
-    pipeline_runtime["error_message"] = None
+    update_pipeline_runtime("running")
     try:
         result = await run_pipeline()
-        pipeline_runtime["state"] = "success"
-        pipeline_runtime["tweets_found"] = len(result.get("raw_tweets", []))
-        pipeline_runtime["viral_found"] = len(result.get("viral_tweets", []))
+        update_pipeline_runtime(
+            state="success",
+            tweets_found=len(result.get("raw_tweets", [])),
+            viral_found=len(result.get("viral_tweets", [])),
+        )
     except Exception as e:
-        pipeline_runtime["state"] = "error"
-        pipeline_runtime["error_message"] = str(e)
+        update_pipeline_runtime(state="error", error_message=str(e))
         print(f"⚠️ Фоновый запуск пайплайна завершился с ошибкой: {e}")
-    finally:
-        pipeline_runtime["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
 async def handle_run_pipeline(request: web.Request) -> web.Response:

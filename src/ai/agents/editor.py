@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Dict, List, Optional, Union
@@ -72,22 +73,25 @@ def set_ai_status(status: str, message: str, waiting_seconds: int = 0) -> None:
 
 
 def is_rate_limit_error(e: Exception) -> bool:
-    """Checks if an exception indicates HTTP 429 / RESOURCE_EXHAUSTED quota limits."""
+    """Checks if an exception indicates HTTP 429 quota limits or 503 temporary model overload."""
     code = getattr(e, "code", None) or getattr(e, "status_code", None)
-    if code == 429 or code == "429":
+    if code in (429, "429", 503, "503"):
         return True
     resp = getattr(e, "response_json", None)
     if isinstance(resp, dict):
         err_dict = resp.get("error", {})
         if isinstance(err_dict, dict):
             c = err_dict.get("code")
-            if c == 429 or c == "429":
+            if c in (429, "429", 503, "503"):
                 return True
             status = str(err_dict.get("status", "")).upper()
-            if "RESOURCE_EXHAUSTED" in status:
+            if any(k in status for k in ("RESOURCE_EXHAUSTED", "UNAVAILABLE", "OVERLOADED")):
+                return True
+            msg = str(err_dict.get("message", "")).upper()
+            if any(k in msg for k in ("HIGH DEMAND", "TEMPORARY", "TRY AGAIN LATER", "UNAVAILABLE")):
                 return True
     err_str = str(e).upper()
-    return "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "QUOTA" in err_str
+    return any(k in err_str for k in ("429", "503", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "QUOTA", "HIGH DEMAND", "OVERLOADED"))
 
 
 def parse_json_safely(text: str) -> dict:

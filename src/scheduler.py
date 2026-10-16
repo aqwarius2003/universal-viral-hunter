@@ -280,11 +280,30 @@ async def run_scheduler(interval_minutes: int, run_immediately: bool = True, ena
                     start_time = datetime.now(get_app_timezone())
 
                     try:
-                        await run_pipeline()
+                        try:
+                            from src.web.server import update_pipeline_runtime
+                            update_pipeline_runtime("running")
+                        except Exception:
+                            pass
+                        res = await run_pipeline()
                         elapsed = (datetime.now(get_app_timezone()) - start_time).total_seconds()
                         log_event(f"✅ Итерация успешно завершена за {elapsed:.1f} сек.")
+                        try:
+                            from src.web.server import update_pipeline_runtime
+                            update_pipeline_runtime(
+                                state="success",
+                                tweets_found=len(res.get("raw_tweets", [])) if isinstance(res, dict) else 0,
+                                viral_found=len(res.get("viral_tweets", [])) if isinstance(res, dict) else 0,
+                            )
+                        except Exception:
+                            pass
                     except Exception as pipeline_err:
                         log_event(f"⚠️ Ошибка выполнения пайплайна: {pipeline_err}")
+                        try:
+                            from src.web.server import update_pipeline_runtime
+                            update_pipeline_runtime(state="error", error_message=str(pipeline_err))
+                        except Exception:
+                            pass
 
                 is_first_run = False
 
