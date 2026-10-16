@@ -100,10 +100,14 @@ def format_telegram_post(tweet_data: dict, ai_data: dict, is_photo: bool = False
     metrics_line = ("📊 " + " · ".join(metric_items)) if metric_items else ""
     author_line = f"𝕏 {author_link}" if show_author else ""
 
+    max_caption_len = getattr(settings, "telegram_max_caption_len", max_caption_len)
+    max_hashtags = getattr(settings, "max_hashtags", 5)
+    show_takeaways = getattr(settings, "show_metric_takeaways", False)
+
     if not is_photo:
-        # Full text message formatting (standard Telegram limit 4096 chars)
-        takeaways_text = "\n".join([f"• {html.escape(t)}" for t in raw_takeaways])
-        hashtags_text = " ".join([html.escape(h) for h in normalized_hashtags])
+        # Full text message formatting
+        takeaways_text = "\n".join([f"• {html.escape(t)}" for t in raw_takeaways]) if (show_takeaways and raw_takeaways) else ""
+        hashtags_text = " ".join([html.escape(h) for h in normalized_hashtags[:max_hashtags]])
         if hashtags_text:
             hashtags_text = ensure_all_hashtags_have_hash(hashtags_text)
 
@@ -126,12 +130,12 @@ def format_telegram_post(tweet_data: dict, ai_data: dict, is_photo: bool = False
             post += f"\n\n{hashtags_text}"
         return enforce_hashtags_in_post(post)
 
-    # --- COMPACT FORMATTING FOR PHOTO CAPTIONS (max 1024 characters) ---
+    # --- COMPACT FORMATTING FOR PHOTO/VIDEO CAPTIONS ---
     target_limit = max_caption_len - 24  # Leave safety cushion
 
-    safe_title = html.escape(title_ru[:80])
-    compact_takeaways = list(raw_takeaways[:3])
-    compact_hashtags = list(normalized_hashtags[:3])
+    safe_title = html.escape(title_ru)
+    compact_takeaways = list(raw_takeaways) if show_takeaways else []
+    compact_hashtags = list(normalized_hashtags[:max_hashtags])
 
     def build_photo_text(summ: str, takeaways_list: list, htags_list: list) -> str:
         s_text = html.escape(summ)

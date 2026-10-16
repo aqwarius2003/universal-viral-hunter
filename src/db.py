@@ -244,6 +244,13 @@ async def init_db() -> None:
             "video_max_size_mb": "50",
             "telegram_admin_id": "",
             "approval_required": "false",
+            "show_metric_takeaways": "false",
+            "max_title_words": "25",
+            "telegram_max_caption_len": "1024",
+            "telegram_max_text_len": "4096",
+            "ai_temperature": "0.3",
+            "max_hashtags": "5",
+            "scout_search_count": "10",
         }
         for k, v in default_presets.items():
             await db.execute(

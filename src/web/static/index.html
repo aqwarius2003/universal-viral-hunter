@@ -2245,9 +2245,9 @@
               </div>
             </div>
 
-            <!-- Metric Checkboxes -->
+            <!-- Metric & Element Checkboxes -->
             <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
-              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Отображение метрик в Telegram-постах</h4>
+              <h4 style="margin-bottom: 12px; font-size: 0.95rem; color: #fff;">Отображение элементов и метрик в Telegram-постах</h4>
               <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; margin-top: 8px;">
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-likes" name="show_metric_likes"> ❤️ Лайки</label>
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-reposts" name="show_metric_reposts"> 🔄 Репосты</label>
@@ -2256,8 +2256,59 @@
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-author" name="show_metric_author"> 👤 Авторство</label>
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-hashtags" name="show_metric_hashtags"> 🏷 Хештеги</label>
                 <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-source-btn" name="show_metric_source_btn"> 🔗 Кнопка источника</label>
+                <label style="display:flex; align-items:center; gap:6px; cursor:pointer;"><input type="checkbox" id="setting-show-takeaways" name="show_metric_takeaways"> 💡 Ключевые тезисы</label>
               </div>
             </div>
+
+            <!-- Advanced Limits & AI Parameters (Spoiler) -->
+            <details style="margin: 16px 0; padding: 14px 16px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid var(--tg-border);">
+              <summary style="cursor: pointer; font-weight: 600; color: #fff; font-size: 0.95rem; user-select: none; display: flex; align-items: center; justify-content: space-between;">
+                <span>⚙️ Расширенные лимиты Telegram и параметры ИИ (Спойлер)</span>
+                <span style="font-size: 0.8rem; color: var(--tg-text-muted);">Развернуть</span>
+              </summary>
+              <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 14px;">
+                <p class="form-hint" style="margin: 0;">Тонкая настройка лимитов, длины текстов и креативности модели. Позволяет адаптировать бота под любой формат контента и изменения правил Telegram.</p>
+                
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="setting-max-title-words">Лимит слов в заголовке</label>
+                    <input type="number" min="3" max="100" class="form-control" id="setting-max-title-words" name="max_title_words" placeholder="25">
+                    <p class="form-hint">Критик бракует заголовок, только если в нём больше этого количества слов (по умолчанию: 25)</p>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-ai-temperature">Креативность ИИ (Temperature 0.0 - 1.0)</label>
+                    <input type="number" step="0.05" min="0.0" max="1.0" class="form-control" id="setting-ai-temperature" name="ai_temperature" placeholder="0.3">
+                    <p class="form-hint">0.1–0.2: строгий сухой стиль, 0.4–0.8: сочный кликбейт, драйв и экспрессия</p>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="setting-max-caption-len">Лимит символов подписи к фото/видео (Telegram Caption)</label>
+                    <input type="number" min="200" max="10000" class="form-control" id="setting-max-caption-len" name="telegram_max_caption_len" placeholder="1024">
+                    <p class="form-hint">Базовый лимит Telegram: 1024. Если Telegram увеличит лимит подписи для Premium, укажите новое значение здесь.</p>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-max-text-len">Лимит символов для текстовых постов</label>
+                    <input type="number" min="500" max="20000" class="form-control" id="setting-max-text-len" name="telegram_max_text_len" placeholder="4096">
+                    <p class="form-hint">Стандартный лимит текстовых сообщений Telegram: 4096 символов</p>
+                  </div>
+                </div>
+
+                <div class="form-row">
+                  <div class="form-group">
+                    <label class="form-label" for="setting-max-hashtags">Максимум хештегов в посте</label>
+                    <input type="number" min="0" max="50" class="form-control" id="setting-max-hashtags" name="max_hashtags" placeholder="5">
+                    <p class="form-hint">Сколько тегов максимум оставлять в конце поста (по умолчанию: 5)</p>
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label" for="setting-scout-search-count">Твитов за поисковый запрос (Scout)</label>
+                    <input type="number" min="1" max="100" class="form-control" id="setting-scout-search-count" name="scout_search_count" placeholder="10">
+                    <p class="form-hint">Сколько твитов запрашивать из X.com за один поиск по топику (по умолчанию: 10)</p>
+                  </div>
+                </div>
+              </div>
+            </details>
 
             <!-- Multi-Topics Management -->
             <div style="margin: 16px 0; padding: 16px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px solid var(--tg-border);">
@@ -4517,6 +4568,14 @@
         if (document.getElementById("setting-show-author")) document.getElementById("setting-show-author").checked = data.show_metric_author !== false;
         if (document.getElementById("setting-show-hashtags")) document.getElementById("setting-show-hashtags").checked = data.show_metric_hashtags !== false;
         if (document.getElementById("setting-show-source-btn")) document.getElementById("setting-show-source-btn").checked = data.show_metric_source_btn !== false;
+        if (document.getElementById("setting-show-takeaways")) document.getElementById("setting-show-takeaways").checked = data.show_metric_takeaways === true;
+
+        if (document.getElementById("setting-max-title-words")) document.getElementById("setting-max-title-words").value = data.max_title_words ?? 25;
+        if (document.getElementById("setting-ai-temperature")) document.getElementById("setting-ai-temperature").value = data.ai_temperature ?? 0.3;
+        if (document.getElementById("setting-max-caption-len")) document.getElementById("setting-max-caption-len").value = data.telegram_max_caption_len ?? 1024;
+        if (document.getElementById("setting-max-text-len")) document.getElementById("setting-max-text-len").value = data.telegram_max_text_len ?? 4096;
+        if (document.getElementById("setting-max-hashtags")) document.getElementById("setting-max-hashtags").value = data.max_hashtags ?? 5;
+        if (document.getElementById("setting-scout-search-count")) document.getElementById("setting-scout-search-count").value = data.scout_search_count ?? 10;
 
         if (document.getElementById("setting-x-queries")) document.getElementById("setting-x-queries").value = data.x_search_queries || "";
         if (document.getElementById("setting-x-relevance")) document.getElementById("setting-x-relevance").value = data.x_relevance_prompt || "";
@@ -4636,6 +4695,32 @@
       if (document.getElementById("setting-show-author")) payload.show_metric_author = document.getElementById("setting-show-author").checked;
       if (document.getElementById("setting-show-hashtags")) payload.show_metric_hashtags = document.getElementById("setting-show-hashtags").checked;
       if (document.getElementById("setting-show-source-btn")) payload.show_metric_source_btn = document.getElementById("setting-show-source-btn").checked;
+      if (document.getElementById("setting-show-takeaways")) payload.show_metric_takeaways = document.getElementById("setting-show-takeaways").checked;
+
+      if (document.getElementById("setting-max-title-words")) {
+        const val = parseInt(document.getElementById("setting-max-title-words").value, 10);
+        if (!isNaN(val)) payload.max_title_words = val;
+      }
+      if (document.getElementById("setting-ai-temperature")) {
+        const val = parseFloat(document.getElementById("setting-ai-temperature").value);
+        if (!isNaN(val)) payload.ai_temperature = val;
+      }
+      if (document.getElementById("setting-max-caption-len")) {
+        const val = parseInt(document.getElementById("setting-max-caption-len").value, 10);
+        if (!isNaN(val)) payload.telegram_max_caption_len = val;
+      }
+      if (document.getElementById("setting-max-text-len")) {
+        const val = parseInt(document.getElementById("setting-max-text-len").value, 10);
+        if (!isNaN(val)) payload.telegram_max_text_len = val;
+      }
+      if (document.getElementById("setting-max-hashtags")) {
+        const val = parseInt(document.getElementById("setting-max-hashtags").value, 10);
+        if (!isNaN(val)) payload.max_hashtags = val;
+      }
+      if (document.getElementById("setting-scout-search-count")) {
+        const val = parseInt(document.getElementById("setting-scout-search-count").value, 10);
+        if (!isNaN(val)) payload.scout_search_count = val;
+      }
 
       if (document.getElementById("setting-x-queries")) payload.x_search_queries = document.getElementById("setting-x-queries").value;
       if (document.getElementById("setting-x-relevance")) payload.x_relevance_prompt = document.getElementById("setting-x-relevance").value;

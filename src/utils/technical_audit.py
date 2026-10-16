@@ -138,7 +138,24 @@ def audit_and_prepare_telegram_content(
     clean_hashtags = format_hashtags(hashtags)
     warnings: List[str] = []
 
-    max_allowed = TELEGRAM_MAX_CAPTION_LEN if is_media else TELEGRAM_MAX_TEXT_LEN
+    try:
+        from src.config import settings
+        max_caption_setting = getattr(settings, "telegram_max_caption_len", TELEGRAM_MAX_CAPTION_LEN)
+        max_text_setting = getattr(settings, "telegram_max_text_len", TELEGRAM_MAX_TEXT_LEN)
+        show_takeaways = getattr(settings, "show_metric_takeaways", False)
+        max_hashtags_setting = getattr(settings, "max_hashtags", 5)
+    except Exception:
+        max_caption_setting = TELEGRAM_MAX_CAPTION_LEN
+        max_text_setting = TELEGRAM_MAX_TEXT_LEN
+        show_takeaways = False
+        max_hashtags_setting = 5
+
+    if not show_takeaways:
+        clean_takeaways = []
+    if max_hashtags_setting and len(clean_hashtags) > max_hashtags_setting:
+        clean_hashtags = clean_hashtags[:max_hashtags_setting]
+
+    max_allowed = max_caption_setting if is_media else max_text_setting
     target_limit = (max_allowed - CAPTION_SAFETY_MARGIN) if is_media else max_allowed
 
     def build_candidate(s_text: str, t_list: List[str], h_list: List[str]) -> str:

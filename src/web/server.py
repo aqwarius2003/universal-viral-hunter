@@ -923,6 +923,13 @@ async def handle_get_settings(request: web.Request) -> web.Response:
         "video_max_size_mb": getattr(settings, "video_max_size_mb", 50),
         "telegram_admin_id": getattr(settings, "telegram_admin_id", ""),
         "approval_required": str(getattr(settings, "approval_required", "false")).lower() == "true",
+        "show_metric_takeaways": getattr(settings, "show_metric_takeaways", False),
+        "max_title_words": getattr(settings, "max_title_words", 25),
+        "telegram_max_caption_len": getattr(settings, "telegram_max_caption_len", 1024),
+        "telegram_max_text_len": getattr(settings, "telegram_max_text_len", 4096),
+        "ai_temperature": getattr(settings, "ai_temperature", 0.3),
+        "max_hashtags": getattr(settings, "max_hashtags", 5),
+        "scout_search_count": getattr(settings, "scout_search_count", 10),
     })
 
 
@@ -1199,9 +1206,45 @@ async def handle_update_settings(request: web.Request) -> web.Response:
     if "backlog_max_chunk_size" in data:
         db_updates["backlog_max_chunk_size"] = max(1, int(data["backlog_max_chunk_size"]))
 
-    for bool_setting in ["show_metric_likes", "show_metric_reposts", "show_metric_views", "show_metric_impact", "show_metric_author", "show_metric_hashtags", "show_metric_source_btn", "approval_required"]:
+    for bool_setting in ["show_metric_likes", "show_metric_reposts", "show_metric_views", "show_metric_impact", "show_metric_author", "show_metric_hashtags", "show_metric_source_btn", "approval_required", "show_metric_takeaways"]:
         if bool_setting in data:
             db_updates[bool_setting] = str(data[bool_setting]).lower() == "true"
+
+    if "max_title_words" in data and data["max_title_words"] not in (None, ""):
+        try:
+            db_updates["max_title_words"] = max(3, min(100, int(data["max_title_words"])))
+        except (ValueError, TypeError):
+            pass
+
+    if "telegram_max_caption_len" in data and data["telegram_max_caption_len"] not in (None, ""):
+        try:
+            db_updates["telegram_max_caption_len"] = max(200, min(10000, int(data["telegram_max_caption_len"])))
+        except (ValueError, TypeError):
+            pass
+
+    if "telegram_max_text_len" in data and data["telegram_max_text_len"] not in (None, ""):
+        try:
+            db_updates["telegram_max_text_len"] = max(500, min(20000, int(data["telegram_max_text_len"])))
+        except (ValueError, TypeError):
+            pass
+
+    if "ai_temperature" in data and data["ai_temperature"] not in (None, ""):
+        try:
+            db_updates["ai_temperature"] = max(0.0, min(1.0, float(data["ai_temperature"])))
+        except (ValueError, TypeError):
+            pass
+
+    if "max_hashtags" in data and data["max_hashtags"] not in (None, ""):
+        try:
+            db_updates["max_hashtags"] = max(0, min(50, int(data["max_hashtags"])))
+        except (ValueError, TypeError):
+            pass
+
+    if "scout_search_count" in data and data["scout_search_count"] not in (None, ""):
+        try:
+            db_updates["scout_search_count"] = max(1, min(100, int(data["scout_search_count"])))
+        except (ValueError, TypeError):
+            pass
 
     if "video_ttl_days" in data:
         db_updates["video_ttl_days"] = int(data["video_ttl_days"])
@@ -1254,6 +1297,13 @@ async def handle_update_settings(request: web.Request) -> web.Response:
             "backlog_digest_enabled": getattr(settings, "backlog_digest_enabled", True),
             "backlog_max_chunk_size": getattr(settings, "backlog_max_chunk_size", 6),
             "app_timezone": getattr(settings, "app_timezone", None),
+            "show_metric_takeaways": getattr(settings, "show_metric_takeaways", False),
+            "max_title_words": getattr(settings, "max_title_words", 25),
+            "telegram_max_caption_len": getattr(settings, "telegram_max_caption_len", 1024),
+            "telegram_max_text_len": getattr(settings, "telegram_max_text_len", 4096),
+            "ai_temperature": getattr(settings, "ai_temperature", 0.3),
+            "max_hashtags": getattr(settings, "max_hashtags", 5),
+            "scout_search_count": getattr(settings, "scout_search_count", 10),
         }
     })
 

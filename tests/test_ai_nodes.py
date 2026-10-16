@@ -5,7 +5,7 @@ from src.ai.agents.critic import critic_node, should_publish
 @pytest.mark.asyncio
 async def test_editor_node_generates_draft(monkeypatch):
     # Arrange
-    async def mock_call_llm(text, media_urls=None):
+    async def mock_call_llm(text, media_urls=None, **kwargs):
         return {
             "title_ru": "Тестовый заголовок",
             "summary_ru": "Тестовая выжимка твита.",
@@ -64,17 +64,42 @@ async def test_critic_node_passes_valid_draft():
     assert should_publish(result) == "publisher"
 
 @pytest.mark.asyncio
-async def test_critic_node_catches_invalid_draft():
+async def test_critic_node_passes_without_takeaways_when_disabled(monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "show_metric_takeaways", False)
+    monkeypatch.setattr(settings, "max_title_words", 25)
+
+    mock_state = {
+        "draft_posts": [
+            {
+                "tweet_id": "1002",
+                "ai_data": {
+                    "title_ru": "💥 РАЗМОТАЛО В ХЛАМ: лобовое на бешеной скорости в центре города",
+                    "takeaways": []  # Zero takeaways
+                }
+            }
+        ]
+    }
+    result = await critic_node(mock_state)
+    assert result.get("validation_errors") == []
+    assert should_publish(result) == "publisher"
+
+@pytest.mark.asyncio
+async def test_critic_node_catches_invalid_draft(monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "show_metric_takeaways", True)
+    monkeypatch.setattr(settings, "max_title_words", 10)
+
     # Arrange
     mock_state = {
         "draft_posts": [
             {
                 "tweet_id": "1002",
                 "ai_data": {
-                    # 11 words (violates Rule 1: max 10)
+                    # 11 words (violates max 10)
                     "title_ru": "Один два три четыре пять шесть семь восемь девять десять одиннадцать", 
-                    # 2 items (violates Rule 2: exactly 3)
-                    "takeaways": ["Только один", "Только два"] 
+                    # 0 items when show_metric_takeaways is True
+                    "takeaways": [] 
                 }
             }
         ]
@@ -87,7 +112,7 @@ async def test_critic_node_catches_invalid_draft():
     # Assert
     assert len(errors) == 2
     assert "Title exceeds 10 words" in errors[0]
-    assert "Must have exactly 3 takeaways" in errors[1]
+    assert "Must have at least 1 takeaway" in errors[1]
     
     # Test routing logic (Loop trigger)
     mock_state_with_errors = {"validation_errors": errors}

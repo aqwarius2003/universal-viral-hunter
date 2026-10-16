@@ -80,3 +80,46 @@ def test_normalize_channel_id():
     assert normalize_channel_id("@my_tech_channel") == "@my_tech_channel"
     assert normalize_channel_id("my_tech_channel") == "@my_tech_channel"
 
+
+def test_audit_omits_takeaways_when_disabled(monkeypatch):
+    from src.config import settings
+    monkeypatch.setattr(settings, "show_metric_takeaways", False)
+
+    res = audit_and_prepare_telegram_content(
+        title="💥 РАЗМОТАЛО В ХЛАМ: лобовое на бешеной скорости",
+        summary="Агрессивное описание происшествия без морализаторства.",
+        takeaways=["Тезис 1", "Тезис 2"],
+        hashtags=["#Авария"],
+        is_media=True,
+    )
+    assert res["is_valid"] is True
+    assert "Тезисы" not in res["formatted_text"]
+    assert "<b>💥 РАЗМОТАЛО В ХЛАМ: лобовое на бешеной скорости</b>" in res["formatted_text"]
+
+
+def test_publisher_formats_without_takeaways_and_no_80char_cut(monkeypatch):
+    from src.config import settings
+    from src.ai.agents.publisher import format_telegram_post
+
+    monkeypatch.setattr(settings, "show_metric_takeaways", False)
+    monkeypatch.setattr(settings, "telegram_max_caption_len", 1024)
+
+    long_title = "💥 ЧУДОВИЩНОЕ ЛОБОВОЕ НА БЕШЕНОЙ СКОРОСТИ: вылетел на встречку и разнес три машины в щепки"
+    assert len(long_title) > 80  # Demonstrating title is longer than 80 chars
+
+    post = format_telegram_post(
+        tweet_data={"author_handle": "crash_hunter"},
+        ai_data={
+            "title_ru": long_title,
+            "summary_ru": "Водитель не справился с управлением.",
+            "takeaways": ["Тезис 1", "Тезис 2"],
+            "hashtags": ["#ДТП"],
+        },
+        is_photo=True,
+    )
+    # 1. Full title must be preserved (not truncated to 80 chars)
+    assert long_title in post
+    # 2. Takeaways must not be present
+    assert "Тезисы" not in post
+
+

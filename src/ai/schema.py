@@ -2,11 +2,11 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 class TweetSummary(BaseModel):
-    title_ru: str = Field(description="Title in Russian, max 10 words")
-    summary_ru: str = Field(description="Summary in Russian, 2-3 sentences")
+    title_ru: str = Field(description="Headline/title in Russian matching the post tone and style")
+    summary_ru: str = Field(description="Post text/summary in Russian matching the requested style and instructions")
     takeaways: List[str] = Field(
         default_factory=list,
-        description="Key takeaways in Russian, or empty list [] if post does not need bullet points", 
+        description="Optional key takeaways in Russian, or empty list [] if not needed or not requested", 
     )
     impact_score: int = Field(default=8, ge=1, le=10, description="Score from 1 to 10")
     impact_reason: str = Field(default="", description="Brief reason for the score in Russian")

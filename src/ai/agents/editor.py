@@ -257,16 +257,16 @@ async def call_llm(
 
     if not system_prompt or not system_prompt.strip():
         system_prompt = (
-            "You are an expert news editor and media analyst. "
+            "You are an expert content editor and media analyst. "
             "Create a strict JSON output matching the schema. "
             "Output all JSON string values strictly in Russian. "
             "All hashtags must strictly start with '#' (e.g. #Новости #Видео #Происшествия). "
-            "No emojis in title or takeaways. No conversational filler."
+            "No conversational filler."
         )
     if not prompt_template or not prompt_template.strip():
         prompt_template = (
             "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\n"
-            "Generate Russian title, summary, 3 key takeaways, impact score (1-10), impact reason, and hashtags (starting with #)."
+            "Generate Russian title, summary, key takeaways (or empty list if not needed), impact score (1-10), impact reason, and hashtags (starting with #)."
         )
     
     author = tweet.get("author_handle", "") or tweet.get("author_name", "") or "Unknown"
@@ -281,6 +281,10 @@ async def call_llm(
         )
     except Exception:
         prompt_text = f"Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}"
+
+    show_takeaways = getattr(settings, "show_metric_takeaways", False)
+    if not show_takeaways:
+        prompt_text += "\n\n💡 Важно: Тезисы (takeaways) для этого поста не требуются. Верни поле takeaways строго пустым списком: \"takeaways\": []"
 
     if editor_instruction and str(editor_instruction).strip():
         instruction_block = (
@@ -303,11 +307,12 @@ async def call_llm(
         except Exception as e:
             logger.warning(f"Failed to append image to text model prompt: {e}")
 
+    ai_temp = float(getattr(settings, "ai_temperature", 0.3))
     config = types.GenerateContentConfig(
         system_instruction=system_prompt,
         response_mime_type="application/json",
         response_schema=TweetSummary,
-        temperature=0.2,
+        temperature=ai_temp,
     )
 
     current_client = get_client()

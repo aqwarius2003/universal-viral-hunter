@@ -365,6 +365,13 @@ async def test_settings_new_fields(tmp_path, monkeypatch):
         assert "show_metric_author" in s
         assert "show_metric_hashtags" in s
         assert "show_metric_source_btn" in s
+        assert "show_metric_takeaways" in s
+        assert "max_title_words" in s
+        assert "telegram_max_caption_len" in s
+        assert "telegram_max_text_len" in s
+        assert "ai_temperature" in s
+        assert "max_hashtags" in s
+        assert "scout_search_count" in s
 
         # POST /api/settings
         resp = await client.post("/api/settings", json={
@@ -377,6 +384,13 @@ async def test_settings_new_fields(tmp_path, monkeypatch):
             "editor_system_prompt": "Строгий редактор",
             "show_metric_likes": True,
             "show_metric_source_btn": False,
+            "show_metric_takeaways": True,
+            "max_title_words": 30,
+            "telegram_max_caption_len": 2048,
+            "telegram_max_text_len": 8192,
+            "ai_temperature": 0.7,
+            "max_hashtags": 7,
+            "scout_search_count": 25,
         })
         assert resp.status == 200
         res = await resp.json()
@@ -389,6 +403,13 @@ async def test_settings_new_fields(tmp_path, monkeypatch):
         assert updated["x_relevance_prompt"] == "Релевантно ли для AI?"
         assert updated["editor_system_prompt"] == "Строгий редактор"
         assert updated["show_metric_source_btn"] is False
+        assert updated["show_metric_takeaways"] is True
+        assert updated["max_title_words"] == 30
+        assert updated["telegram_max_caption_len"] == 2048
+        assert updated["telegram_max_text_len"] == 8192
+        assert updated["ai_temperature"] == 0.7
+        assert updated["max_hashtags"] == 7
+        assert updated["scout_search_count"] == 25
 
     finally:
         await client.close()

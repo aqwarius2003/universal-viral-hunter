@@ -459,19 +459,20 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
             safe_print(f"🔍 Scout: Поиск по топику '{topic_name}' -> {query}")
             
             search_results = []
+            search_count = getattr(settings, "scout_search_count", 10)
             try:
-                res = await client.search_tweet(query, product="Top", count=10)
+                res = await client.search_tweet(query, product="Top", count=search_count)
                 if not res:
-                    res = await client.search_tweet(query, product="Latest", count=10)
+                    res = await client.search_tweet(query, product="Latest", count=search_count)
                 if res:
                     search_results.extend(res)
             except Exception as search_err:
                 if hasattr(client, "refresh_transaction") and callable(client.refresh_transaction):
                     try:
                         client.refresh_transaction()
-                        res = await client.search_tweet(query, product="Top", count=10)
+                        res = await client.search_tweet(query, product="Top", count=search_count)
                         if not res:
-                            res = await client.search_tweet(query, product="Latest", count=10)
+                            res = await client.search_tweet(query, product="Latest", count=search_count)
                         if res:
                             search_results.extend(res)
                     except Exception as retry_err:

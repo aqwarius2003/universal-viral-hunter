@@ -49,14 +49,14 @@ class Settings(BaseSettings):
     scout_interval_minutes: Optional[int] = None
     metric_refresh_hours: int = 48
     metric_refresh_limit: int = 20
-    editor_system_prompt: str = "You are an expert AI news editor and technical analyst. Create a strict JSON output matching the schema. Output all JSON string values strictly in Russian. All hashtags must strictly start with '#' (e.g. #ИИ #Нейросети #Кибербезопасность). No emojis in title or takeaways. No conversational filler."
-    editor_prompt_template: str = "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\nGenerate Russian title, summary, 3 key takeaways, impact score (1-10), impact reason, and hashtags (starting with #)."
+    editor_system_prompt: str = "You are an expert content editor and media analyst. Create a strict JSON output matching the schema. Output all JSON string values strictly in Russian. All hashtags must strictly start with '#' (e.g. #Новости #Видео #Происшествия). No conversational filler."
+    editor_prompt_template: str = "Analyze this tweet: {text}\nAuthor: {author}\nDate: {date}\nMedia count: {media_count}\n\nGenerate Russian title, summary, key takeaways (or empty list if not needed), impact score (1-10), impact reason, and hashtags (starting with #)."
     max_digest_items: int = 10
     queue_sort_strategy: str = "BY_VIRAL_SCORE"
     backlog_digest_enabled: bool = True
     backlog_max_chunk_size: int = 6
 
-    # Web Panel UI Flags (Telegram Metrics)
+    # Web Panel UI Flags (Telegram Metrics & Elements)
     show_metric_likes: bool = True
     show_metric_reposts: bool = True
     show_metric_views: bool = True
@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     show_metric_author: bool = True
     show_metric_hashtags: bool = True
     show_metric_source_btn: bool = True
+    show_metric_takeaways: bool = False
+
+    # Advanced Customizable Limits & AI Parameters
+    max_title_words: int = 25
+    telegram_max_caption_len: int = 1024
+    telegram_max_text_len: int = 4096
+    ai_temperature: float = 0.3
+    max_hashtags: int = 5
+    scout_search_count: int = 10
 
     @property
     def primary_model(self) -> str:

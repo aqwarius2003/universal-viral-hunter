@@ -144,7 +144,8 @@ async def send_photo_to_channel(text: str, photo_url: str, tweet_url: Optional[s
 
     try:
         photo = URLInputFile(photo_url) if isinstance(photo_url, str) and photo_url.startswith("http") else photo_url
-        if len(text) <= MAX_CAPTION_LENGTH:
+        max_caption = getattr(settings, "telegram_max_caption_len", MAX_CAPTION_LENGTH)
+        if len(text) <= max_caption:
             sent_msg = await bot.send_photo(
                 chat_id=channel_id,
                 photo=photo,
