@@ -1080,12 +1080,17 @@ def is_secret_placeholder_or_empty(key: str, val: Any) -> bool:
     return False
 
 
-async def save_system_settings_dual(settings_dict: Dict[str, Any], env_path: Optional[str] = None) -> None:
+async def save_system_settings_dual(settings_dict: Any, env_path: Optional[str] = None) -> None:
     """
     Dual-writes settings to SQLite system_settings table and .env file,
     and updates the active in-memory settings object.
     Protects against test overwrites, template placeholders, and keeps backups.
+    Supports either a dict of updates or (key, value) arguments.
     """
+    if isinstance(settings_dict, str):
+        settings_dict = {settings_dict: env_path}
+        env_path = None
+
     from pathlib import Path
     now_iso = datetime.now(timezone.utc).isoformat()
     env_updates: Dict[str, str] = {}

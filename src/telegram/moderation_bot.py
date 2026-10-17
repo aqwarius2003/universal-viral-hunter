@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 try:
     from aiogram import Bot, Dispatcher, F, types
@@ -104,24 +105,23 @@ async def stop_moderation_bot() -> None:
         _runner_task.cancel()
 
 
-def build_admin_keyboard(tweet_id: str, tweet_url: str) -> InlineKeyboardMarkup:
+def build_admin_keyboard(tweet_id: str, tweet_url: Optional[str] = None) -> InlineKeyboardMarkup:
     """Builds interactive inline keyboard for the admin review."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"pub:{tweet_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rej:{tweet_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="🔄 На доработку ИИ", callback_data=f"rew:{tweet_id}"),
-                InlineKeyboardButton(text="✏️ Править подпись", callback_data=f"edit_txt:{tweet_id}"),
-            ],
-            [
-                InlineKeyboardButton(text="📝 С комментом", callback_data=f"cmt:{tweet_id}"),
-                InlineKeyboardButton(text="🔗 Оригинал в X", url=tweet_url),
-            ],
-        ]
-    )
+    keyboard = [
+        [
+            InlineKeyboardButton(text="✅ Опубликовать", callback_data=f"pub:{tweet_id}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rej:{tweet_id}"),
+        ],
+        [
+            InlineKeyboardButton(text="🔄 На доработку ИИ", callback_data=f"rew:{tweet_id}"),
+            InlineKeyboardButton(text="✏️ Править подпись", callback_data=f"edit_txt:{tweet_id}"),
+        ],
+    ]
+    bottom_row = [InlineKeyboardButton(text="📝 С комментом", callback_data=f"cmt:{tweet_id}")]
+    if tweet_url and isinstance(tweet_url, str) and tweet_url.startswith("http"):
+        bottom_row.append(InlineKeyboardButton(text="🔗 Оригинал в X", url=tweet_url))
+    keyboard.append(bottom_row)
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 async def delete_admin_moderation_message(tweet_id: str) -> None:
@@ -166,11 +166,11 @@ async def send_post_card_to_admin(tweet: Dict[str, Any]) -> Optional[int]:
     """
     admin_id = getattr(settings, "telegram_admin_id", None)
     if not admin_id:
-        return None
+        raise ValueError("ID администратора Telegram не настроен (укажите ID в настройках или отправьте /start боту).")
 
     bot = get_bot()
     if not bot:
-        return None
+        raise ValueError("Токен Telegram-бота не задан или бот не запущен (проверьте настройки).")
 
     # Remove previous card if any (ensures no duplicate cards)
     try:
@@ -180,9 +180,19 @@ async def send_post_card_to_admin(tweet: Dict[str, Any]) -> Optional[int]:
 
     ai_data_raw = tweet.get("summary_json") or "{}"
     try:
-        ai_data = json.loads(ai_data_raw)
+        ai_data = json.loads(ai_data_raw) if isinstance(ai_data_raw, str) else ai_data_raw
     except Exception:
         ai_data = {}
+    if not isinstance(ai_data, dict):
+        ai_data = {}
+
+    # Safety fallback if summary_json has no title_ru or summary_ru
+    if not ai_data.get("title_ru") and not ai_data.get("summary_ru"):
+        raw_text = tweet.get("text_raw", "")
+        ai_data["title_ru"] = (raw_text[:60].strip() or "Новый пост").replace("\n", " ")
+        ai_data["summary_ru"] = raw_text.strip() or "Без описания"
+        if "hashtags" not in ai_data:
+            ai_data["hashtags"] = ["#Новости"]
 
     media_urls = tweet.get("media_urls", [])
     if isinstance(media_urls, str):
@@ -190,6 +200,8 @@ async def send_post_card_to_admin(tweet: Dict[str, Any]) -> Optional[int]:
             media_urls = json.loads(media_urls)
         except Exception:
             media_urls = []
+    elif not isinstance(media_urls, list):
+        media_urls = []
 
     video_data = tweet.get("video_data")
     if isinstance(video_data, str):
@@ -260,8 +272,8 @@ async def send_post_card_to_admin(tweet: Dict[str, Any]) -> Optional[int]:
             await save_tweet_admin_message_id(tweet["tweet_id"], sent_msg_id)
         return sent_msg_id
     except Exception as e:
-        logger.error(f"Error sending post card to admin: {e}")
-        return None
+        logger.error(f"Error sending post card to admin for tweet {tweet.get('tweet_id')}: {e}")
+        raise
 
 
 async def _publish_approved_post(tweet_id: str, custom_comment: str = None, bot: Bot = None, callback: CallbackQuery = None):
@@ -591,10 +603,12 @@ async def handle_start_command(message: types.Message):
         settings.approval_required = True
         try:
             from src.db import save_system_settings_dual
-            await save_system_settings_dual("telegram_admin_id", str(user_id))
-            await save_system_settings_dual("approval_required", "true")
-        except Exception:
-            pass
+            await save_system_settings_dual({
+                "telegram_admin_id": str(user_id),
+                "approval_required": "true",
+            })
+        except Exception as e:
+            logger.error(f"Failed to save admin settings in /start: {e}")
         is_admin = True
         current_admin_id = str(user_id)
         approval_required = True
@@ -643,10 +657,12 @@ async def handle_sync_command(message: types.Message):
         settings.approval_required = True
         try:
             from src.db import save_system_settings_dual
-            await save_system_settings_dual("telegram_admin_id", str(user_id))
-            await save_system_settings_dual("approval_required", "true")
-        except Exception:
-            pass
+            await save_system_settings_dual({
+                "telegram_admin_id": str(user_id),
+                "approval_required": "true",
+            })
+        except Exception as e:
+            logger.error(f"Failed to save admin settings in /sync: {e}")
         current_admin_id = str(user_id)
 
     if str(current_admin_id).strip() != str(user_id):
@@ -671,6 +687,7 @@ async def handle_sync_command(message: types.Message):
 
         sent_count = 0
         failed_count = 0
+        last_error_msg = None
         for post in queued:
             try:
                 msg_id = await send_post_card_to_admin(post)
@@ -678,10 +695,14 @@ async def handle_sync_command(message: types.Message):
                     sent_count += 1
                 else:
                     failed_count += 1
+                    if not last_error_msg:
+                        last_error_msg = "Карточка не вернула ID сообщения"
                 await asyncio.sleep(0.3)
             except Exception as e:
                 logger.error(f"Error syncing post {post.get('tweet_id')}: {e}")
                 failed_count += 1
+                if not last_error_msg:
+                    last_error_msg = str(e)
 
         res_text = (
             f"✅ <b>Синхронизация завершена!</b>\n\n"
@@ -690,6 +711,9 @@ async def handle_sync_command(message: types.Message):
         )
         if failed_count > 0:
             res_text += f"⚠️ Ошибок отправки: {failed_count}\n"
+            if last_error_msg:
+                import html as pyhtml
+                res_text += f"🔍 <i>Причина: {pyhtml.escape(last_error_msg[:200])}</i>\n"
         res_text += f"\nКарточки выше готовы к модерации и публикации."
         await progress_msg.edit_text(res_text)
     except Exception as e:
