@@ -292,6 +292,11 @@ async def build_and_send_digest_chunks(
                     impact_score=tweet.get("impact_score", 0),
                     summary_json=tweet.get("summary_json") if isinstance(tweet.get("summary_json"), str) else json.dumps(tweet.get("summary_json"), ensure_ascii=False) if tweet.get("summary_json") else None
                 )
+                try:
+                    from src.telegram.moderation_bot import delete_admin_moderation_message
+                    await delete_admin_moderation_message(tweet["tweet_id"])
+                except Exception:
+                    pass
             safe_print(f"✅ Блок {idx}/{total_parts} опубликован. {len(chunk)} постов отмечены как POSTED.")
             if idx < total_parts:
                 delay_minutes = interval_minutes if interval_minutes is not None else settings.digest_block_interval_minutes
@@ -546,6 +551,11 @@ async def run_daily_digest(slot_id: Optional[str] = None, is_test: bool = False)
                 impact_score=summary_data.get("impact_score", 10),
                 summary_json=json.dumps(summary_data, ensure_ascii=False),
             )
+            try:
+                from src.telegram.moderation_bot import delete_admin_moderation_message
+                await delete_admin_moderation_message(super_tweet["tweet_id"])
+            except Exception:
+                pass
             super_tweet["status"] = "POSTED"
             safe_print("✅ Супер-виральная новость успешно опубликована отдельным постом.")
         else:
@@ -627,6 +637,11 @@ async def run_daily_digest(slot_id: Optional[str] = None, is_test: bool = False)
                 impact_score=tweet.get("impact_score", 0),
                 summary_json=tweet.get("summary_json") if isinstance(tweet.get("summary_json"), str) else json.dumps(tweet.get("summary_json"), ensure_ascii=False) if tweet.get("summary_json") else None
             )
+            try:
+                from src.telegram.moderation_bot import delete_admin_moderation_message
+                await delete_admin_moderation_message(tweet["tweet_id"])
+            except Exception:
+                pass
 
         safe_print("✅ Дайджест успешно опубликован и зафиксирован в БД.")
     else:

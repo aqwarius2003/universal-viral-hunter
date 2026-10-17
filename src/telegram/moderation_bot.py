@@ -147,12 +147,20 @@ async def delete_admin_moderation_message(tweet_id: str) -> None:
         logger.debug(f"Could not delete admin message {admin_msg_id}: {e}")
         try:
             # If deletion is impossible (e.g. > 48h), edit into a clean published marker
-            await bot.edit_message_caption(
-                chat_id=normalize_channel_id(admin_id),
-                message_id=admin_msg_id,
-                caption="✅ <b>Опубликовано в канал.</b>",
-                reply_markup=None,
-            )
+            try:
+                await bot.edit_message_caption(
+                    chat_id=normalize_channel_id(admin_id),
+                    message_id=admin_msg_id,
+                    caption="✅ <b>Опубликовано в канал.</b>",
+                    reply_markup=None,
+                )
+            except Exception:
+                await bot.edit_message_text(
+                    chat_id=normalize_channel_id(admin_id),
+                    message_id=admin_msg_id,
+                    text="✅ <b>Опубликовано в канал.</b>",
+                    reply_markup=None,
+                )
         except Exception:
             pass
     finally:
