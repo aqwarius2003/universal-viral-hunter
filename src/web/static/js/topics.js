@@ -66,22 +66,31 @@ export function renderTopics(topics) {
 export function openTopicModal(topicId = null) {
   const form = document.getElementById("topic-form");
   if (form) form.reset();
-  document.getElementById("topic-id").value = "";
-  document.getElementById("topic-modal-title").textContent = "Новый топик";
-  document.getElementById("topic-is-active").checked = true;
+  const idEl = document.getElementById("topic-id");
+  if (idEl) idEl.value = "";
+  const titleEl = document.getElementById("topic-modal-title");
+  if (titleEl) titleEl.textContent = "Новый топик";
+  const activeEl = document.getElementById("topic-is-active");
+  if (activeEl) activeEl.checked = true;
 
-  if (topicId) {
-    const t = allTopicsList.find(x => x.id === topicId);
+  if (topicId !== null && topicId !== undefined) {
+    const t = allTopicsList.find(x => String(x.id) === String(topicId));
     if (t) {
-      document.getElementById("topic-id").value = t.id;
-      document.getElementById("topic-modal-title").textContent = `Редактирование: ${t.name}`;
-      document.getElementById("topic-name").value = t.name || "";
-      document.getElementById("topic-queries").value = t.search_queries || "";
-      document.getElementById("topic-media-type").value = t.media_type || "any";
-      document.getElementById("topic-channel-id").value = t.telegram_channel_id || "";
-      document.getElementById("topic-system-prompt").value = t.system_prompt || "";
-      document.getElementById("topic-prompt-template").value = t.prompt_template || "";
-      document.getElementById("topic-is-active").checked = t.is_active === 1 || t.is_active === true;
+      if (idEl) idEl.value = t.id;
+      if (titleEl) titleEl.textContent = `Редактирование: ${t.name}`;
+      const nameEl = document.getElementById("topic-name");
+      if (nameEl) nameEl.value = t.name || "";
+      const queriesEl = document.getElementById("topic-queries");
+      if (queriesEl) queriesEl.value = t.search_queries || "";
+      const mediaEl = document.getElementById("topic-media-type");
+      if (mediaEl) mediaEl.value = t.media_type || "any";
+      const chanEl = document.getElementById("topic-channel-id");
+      if (chanEl) chanEl.value = t.telegram_channel_id || "";
+      const sysEl = document.getElementById("topic-system-prompt");
+      if (sysEl) sysEl.value = t.system_prompt || "";
+      const tmplEl = document.getElementById("topic-prompt-template");
+      if (tmplEl) tmplEl.value = t.prompt_template || "";
+      if (activeEl) activeEl.checked = t.is_active === 1 || t.is_active === true;
     }
   }
 
@@ -96,15 +105,15 @@ export function closeTopicModal() {
 
 export async function handleTopicSubmit(e) {
   e.preventDefault();
-  const topicId = document.getElementById("topic-id").value;
+  const topicId = document.getElementById("topic-id")?.value;
   const data = {
-    name: document.getElementById("topic-name").value.trim(),
-    search_queries: document.getElementById("topic-queries").value.trim(),
-    media_type: document.getElementById("topic-media-type").value,
-    telegram_channel_id: document.getElementById("topic-channel-id").value.trim(),
-    system_prompt: document.getElementById("topic-system-prompt").value.trim(),
-    prompt_template: document.getElementById("topic-prompt-template").value.trim(),
-    is_active: document.getElementById("topic-is-active").checked ? 1 : 0
+    name: document.getElementById("topic-name")?.value.trim() || "",
+    search_queries: document.getElementById("topic-queries")?.value.trim() || "",
+    media_type: document.getElementById("topic-media-type")?.value || "any",
+    telegram_channel_id: document.getElementById("topic-channel-id")?.value.trim() || "",
+    system_prompt: document.getElementById("topic-system-prompt")?.value.trim() || "",
+    prompt_template: document.getElementById("topic-prompt-template")?.value.trim() || "",
+    is_active: document.getElementById("topic-is-active")?.checked ? 1 : 0
   };
 
   try {
@@ -122,14 +131,30 @@ export async function handleTopicSubmit(e) {
   }
 }
 
-export async function deleteTopic(topicId) {
-  if (!confirm("Вы уверены, что хотите удалить этот топик?")) return;
-  try {
-    await api.delete(`/api/topics/${topicId}`);
-    showToast("Топик удален", "info");
-    loadTopics();
-  } catch (err) {
-    showToast("Ошибка удаления: " + err.message, "error");
+export function deleteTopic(topicId) {
+  const t = allTopicsList.find(x => String(x.id) === String(topicId));
+  const topicName = t ? t.name : `топик #${topicId}`;
+
+  if (typeof window.showConfirmDialog === 'function') {
+    window.showConfirmDialog({
+      title: "🗑️ Удаление топика",
+      message: `Вы действительно хотите удалить тематический топик <b>«${escapeHtml(topicName)}»</b>? Поисковые запросы по этой теме будут остановлены.`,
+      confirmText: "Да, удалить",
+      onConfirm: async () => {
+        try {
+          await api.delete(`/api/topics/${topicId}`);
+          showToast("Топик успешно удален", "info");
+          loadTopics();
+        } catch (err) {
+          showToast("Ошибка удаления: " + err.message, "error");
+        }
+      }
+    });
+  } else if (confirm("Удалить этот топик?")) {
+    api.delete(`/api/topics/${topicId}`).then(() => {
+      showToast("Топик удален", "info");
+      loadTopics();
+    }).catch(err => showToast("Ошибка: " + err.message, "error"));
   }
 }
 

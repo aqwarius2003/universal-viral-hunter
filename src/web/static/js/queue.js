@@ -79,14 +79,31 @@ export async function publishNow(tweetId) {
   }
 }
 
-export async function deletePost(tweetId) {
-  if (!confirm("Удалить этот пост из очереди публикаций?")) return;
-  try {
-    await api.delete(`/api/posts/${tweetId}`);
-    showToast("Пост удален из очереди", "info");
-    loadQueue();
-  } catch (err) {
-    showToast("Ошибка при удалении: " + err.message, "error");
+export function deletePost(tweetId) {
+  const post = queueData.find(p => p.tweet_id === tweetId);
+  const title = post ? (post.summary_data?.title_ru || post.text_raw?.slice(0, 50)) : '';
+  const isVideo = Boolean(post && post.video_data);
+
+  if (typeof window.showConfirmDialog === 'function') {
+    window.showConfirmDialog({
+      title: isVideo ? "🗑️ Удаление видеоролика" : "🗑️ Удаление публикации",
+      message: `Вы действительно хотите удалить ${isVideo ? 'видеоролик' : 'публикацию'} <b>«${escapeHtml(title || 'Без названия')}»</b> из очереди? Это действие нельзя отменить.`,
+      confirmText: "Да, удалить",
+      onConfirm: async () => {
+        try {
+          await api.delete(`/api/posts/${tweetId}`);
+          showToast("Пост удален из очереди", "info");
+          loadQueue();
+        } catch (err) {
+          showToast("Ошибка при удалении: " + err.message, "error");
+        }
+      }
+    });
+  } else if (confirm("Удалить этот пост из очереди?")) {
+    api.delete(`/api/posts/${tweetId}`).then(() => {
+      showToast("Пост удален из очереди", "info");
+      loadQueue();
+    }).catch(err => showToast("Ошибка: " + err.message, "error"));
   }
 }
 

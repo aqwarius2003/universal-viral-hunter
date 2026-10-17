@@ -75,9 +75,11 @@ async function updateStatuses() {
     const aiPill = document.getElementById('ai-status-pill');
     const aiText = document.getElementById('ai-status-text');
     if (aiPill && aiText && statusData) {
-      const isOk = statusData.ai_status === 'ok' || statusData.gemini_status === 'ok';
-      aiPill.className = `status-pill ${isOk ? 'status-pill-ok' : 'status-pill-error'}`;
-      aiText.innerText = isOk ? 'ИИ: ОК' : 'ИИ: Ошибка';
+      const isOk = statusData.status === 'ok';
+      const isBusy = statusData.status === 'busy' || statusData.status === 'waiting';
+      aiPill.className = `status-pill ${isOk ? 'status-pill-ok' : (isBusy ? 'status-pill-pending' : 'status-pill-error')}`;
+      aiText.innerText = isOk ? `ИИ: Готов` : (isBusy ? 'ИИ: Занят...' : 'ИИ: Ошибка');
+      aiPill.title = statusData.message || (isOk ? `Модель: ${statusData.model}` : "Нажмите для подробностей");
     }
   } catch (e) {}
 
@@ -100,10 +102,27 @@ async function updateStatuses() {
   }
 }
 
+export async function showStatusDetails() {
+  try {
+    const data = await api.get('/api/status');
+    alert(
+      `Статус ИИ (Gemini):\n\n` +
+      `• Состояние: ${data.status}\n` +
+      `• Активная модель: ${data.model}\n` +
+      `• Задержка между запросами: ${data.delay_setting || 4} сек\n` +
+      `• Сообщение: ${data.message || 'Все системы в норме'}\n\n` +
+      `Подсказка: Во вкладке «Настройки» можно указать ваш актуальный Google Gemini API Key.`
+    );
+  } catch (err) {
+    alert("Не удалось получить статус: " + err.message);
+  }
+}
+
 // Window bindings
 window.setViewMode = setViewMode;
 window.switchTab = switchTab;
 window.triggerPipeline = triggerPipeline;
+window.showStatusDetails = showStatusDetails;
 
 // DOM Ready initialization
 document.addEventListener('DOMContentLoaded', () => {

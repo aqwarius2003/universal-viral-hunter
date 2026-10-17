@@ -37,7 +37,7 @@
         </a>
 
         <div class="header-status-group">
-          <div id="ai-status-pill" class="status-pill status-pill-pending" title="Статус ИИ-модели">
+          <div id="ai-status-pill" class="status-pill status-pill-pending" onclick="window.showStatusDetails()" title="Нажмите для проверки статуса ИИ">
             <span class="status-dot"></span>
             <span id="ai-status-text">ИИ: Проверка...</span>
           </div>
@@ -216,16 +216,43 @@
             </div>
           </div>
 
+          <!-- AI Model & Prompt Settings Block -->
+          <div style="padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid var(--tg-border); border-radius: var(--radius); margin-bottom: 16px;">
+            <h3 style="font-size: 1rem; color: #fff; margin-bottom: 8px;">🤖 Модель ИИ (Google Gemini)</h3>
+            <p class="form-hint" style="margin-bottom: 10px;">Выберите активную языковую модель для суммаризации и перевода твитов.</p>
+            
+            <div class="form-group">
+              <label class="form-label">Быстрый выбор модели</label>
+              <div class="model-btn-group">
+                <button type="button" class="model-btn" data-model="gemini-2.5-flash-lite" onclick="window.selectModel('gemini-2.5-flash-lite, gemini-1.5-flash')">⚡ 2.5 Flash-Lite (Быстрая / Высокие лимиты)</button>
+                <button type="button" class="model-btn" data-model="gemini-1.5-flash" onclick="window.selectModel('gemini-1.5-flash')">🎯 1.5 Flash (Стабильная)</button>
+                <button type="button" class="model-btn" data-model="gemini-2.5-flash" onclick="window.selectModel('gemini-2.5-flash')">🧠 2.5 Flash (Умная)</button>
+              </div>
+            </div>
+
+            <div class="form-row" style="margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label" for="setting-model">Имя модели (через запятую для fallback)</label>
+                <input type="text" class="form-control" id="setting-model" name="ai_model_name" placeholder="gemini-2.5-flash-lite, gemini-1.5-flash">
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="setting-delay">Пауза между запросами (сек)</label>
+                <input type="number" min="1" max="60" class="form-control" id="setting-delay" name="ai_request_delay_seconds" value="4">
+              </div>
+            </div>
+          </div>
+
           <!-- API Keys Block -->
           <div style="padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid var(--tg-border); border-radius: var(--radius); margin-bottom: 20px;">
             <h3 style="font-size: 1rem; color: #fff; margin-bottom: 8px;">🔑 API-ключи и авторизация</h3>
+            <p class="form-hint" style="margin-bottom: 12px;">Введите новый ключ и нажмите «Сохранить настройки». Если оставить маску (например, AIza...***), текущий ключ не изменится.</p>
             <div class="form-group">
-              <label class="form-label" for="setting-gemini-key">Gemini API Key</label>
-              <input type="password" class="form-control" id="setting-gemini-key" name="ai_api_key" placeholder="AIzaSy...">
+              <label class="form-label" for="setting-gemini-key">Google Gemini API Key</label>
+              <input type="text" class="form-control" id="setting-gemini-key" name="ai_api_key" placeholder="Вставьте ваш AIzaSy..." autocomplete="off">
             </div>
             <div class="form-group">
               <label class="form-label" for="setting-bot-token">Telegram Bot Token</label>
-              <input type="password" class="form-control" id="setting-bot-token" name="telegram_bot_token" placeholder="123456:ABC-DEF...">
+              <input type="text" class="form-control" id="setting-bot-token" name="telegram_bot_token" placeholder="123456:ABC-DEF..." autocomplete="off">
             </div>
           </div>
 
@@ -338,6 +365,16 @@
           </div>
 
           <div class="form-group">
+            <label class="form-label" for="topic-system-prompt">Кастомный системный промпт (необязательно)</label>
+            <textarea class="form-control" id="topic-system-prompt" rows="2" placeholder="Оставьте пустым для глобального промпта"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="topic-prompt-template">Кастомный шаблон суммаризации (необязательно)</label>
+            <textarea class="form-control" id="topic-prompt-template" rows="2" placeholder="Оставьте пустым для глобального шаблона"></textarea>
+          </div>
+
+          <div class="form-group">
             <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
               <input type="checkbox" id="topic-is-active" checked>
               <span>Топик активен для сбора постов</span>
@@ -349,6 +386,25 @@
             <button type="submit" class="btn btn-sm btn-primary">Сохранить топик</button>
           </div>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONFIRM ACTION MODAL (MODAL CONFIRMATION DIALOG) -->
+  <div class="modal-backdrop" id="confirm-modal">
+    <div class="modal-dialog" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 class="modal-title" id="confirm-modal-title">🗑️ Подтверждение удаления</h3>
+        <button class="modal-close-btn" onclick="window.closeConfirmModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-modal-message" style="font-size:0.9rem; color:var(--tg-text); line-height:1.5;">
+          Вы действительно хотите удалить этот объект? Это действие нельзя отменить.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-sm" onclick="window.closeConfirmModal()">Отмена</button>
+        <button type="button" class="btn btn-sm btn-danger" id="btn-confirm-action">Удалить</button>
       </div>
     </div>
   </div>

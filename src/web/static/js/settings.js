@@ -57,10 +57,23 @@ export async function loadSettings() {
     setVal("tw-login-email", data.twitter_email ?? "");
     setVal("tw-login-proxy", data.twitter_proxy_url ?? "");
 
+    document.querySelectorAll(".model-btn").forEach(btn => {
+      btn.classList.toggle("active", (data.ai_model_name || '').includes(btn.dataset.model));
+    });
+
     loadTopics();
   } catch (err) {
     console.error("Failed to load settings:", err);
   }
+}
+
+export function selectModel(modelName) {
+  const el = document.getElementById("setting-model");
+  if (el) el.value = modelName;
+  document.querySelectorAll(".model-btn").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.model === modelName);
+  });
+  showToast(`Выбрана модель: ${modelName}`, "info");
 }
 
 export async function saveSettings(e) {
@@ -89,3 +102,4 @@ export async function saveSettings(e) {
 
 window.loadSettings = loadSettings;
 window.saveSettings = saveSettings;
+window.selectModel = selectModel;

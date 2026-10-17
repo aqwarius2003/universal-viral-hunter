@@ -183,7 +183,37 @@ export async function reprocessPostWithAI() {
   }
 }
 
+let pendingConfirmCallback = null;
+
+export function showConfirmDialog({ title, message, confirmText = 'Удалить', onConfirm }) {
+  const modal = document.getElementById("confirm-modal");
+  const titleEl = document.getElementById("confirm-modal-title");
+  const msgEl = document.getElementById("confirm-modal-message");
+  const btnConfirm = document.getElementById("btn-confirm-action");
+
+  if (titleEl && title) titleEl.innerHTML = title;
+  if (msgEl && message) msgEl.innerHTML = message;
+  if (btnConfirm) {
+    btnConfirm.innerText = confirmText;
+    pendingConfirmCallback = onConfirm;
+    btnConfirm.onclick = () => {
+      closeConfirmModal();
+      if (pendingConfirmCallback) pendingConfirmCallback();
+    };
+  }
+
+  if (modal) modal.classList.add("active");
+}
+
+export function closeConfirmModal() {
+  const modal = document.getElementById("confirm-modal");
+  if (modal) modal.classList.remove("active");
+  pendingConfirmCallback = null;
+}
+
 window.openEditModal = openEditModal;
 window.closeEditModal = closeEditModal;
 window.submitEditPost = submitEditPost;
 window.reprocessPostWithAI = reprocessPostWithAI;
+window.showConfirmDialog = showConfirmDialog;
+window.closeConfirmModal = closeConfirmModal;
