@@ -1,0 +1,28 @@
+:root {
+  --tg-bg: #0e1621;
+  --tg-header: #17212b;
+  --tg-card: #182533;
+  --tg-card-hover: #1e2e3f;
+  --tg-card-border: rgba(255, 255, 255, 0.08);
+  --tg-primary: #24a1de;
+  --tg-primary-hover: #1d8bc0;
+  --tg-primary-glow: rgba(36, 161, 222, 0.35);
+  --tg-accent-green: #2ecc71;
+  --tg-accent-amber: #f39c12;
+  --tg-accent-red: #e74c3c;
+  --tg-accent-purple: #8b5cf6;
+  --tg-text: #f5f5f5;
+  --tg-text-muted: #7f93a3;
+  --tg-text-dim: #5c6f80;
+  --tg-border: rgba(255, 255, 255, 0.08);
+  --tg-border-light: rgba(255, 255, 255, 0.15);
+  --tg-button-bg: #2b394a;
+  --tg-button-hover: #36475d;
+  --tg-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --tg-shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.5);
+  --radius-sm: 6px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}

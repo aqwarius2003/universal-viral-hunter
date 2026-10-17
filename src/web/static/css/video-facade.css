@@ -1,0 +1,93 @@
+/* CLICK-TO-PLAY VIDEO FACADE COMPONENT */
+.video-facade {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  background: #000;
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.video-facade:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), inset 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.video-facade-poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), filter 0.35s ease;
+}
+
+.video-facade:hover .video-facade-poster {
+  transform: scale(1.03);
+  filter: brightness(0.85);
+}
+
+/* Frosted glass centered Play button */
+.video-play-btn {
+  position: absolute;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: rgba(14, 22, 33, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.video-play-btn svg {
+  transform: translateX(1px);
+}
+
+.video-facade:hover .video-play-btn {
+  transform: scale(1.15);
+  background: var(--tg-primary);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow: 0 0 28px rgba(36, 161, 222, 0.7);
+}
+
+/* Video badge */
+.video-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(6px);
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Active native HTML5 video inside facade */
+.video-player-active {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  border-radius: var(--radius);
+  outline: none;
+}
