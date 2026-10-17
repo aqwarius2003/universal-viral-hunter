@@ -497,8 +497,10 @@ async def test_version_and_reprocess_api(tmp_path, monkeypatch, mocker):
         ver_data = await resp.json()
         assert "version" in ver_data
         assert "git_commit" in ver_data
-        assert ver_data["version"] == "v2.1.0"
-        assert ver_data["raw_version"] == "2.1.0"
+        from src.version import get_version
+        expected_raw = get_version()
+        assert ver_data["version"] == f"v{expected_raw}"
+        assert ver_data["raw_version"] == expected_raw
 
         # 2. Mock reprocess_tweet_with_editor_feedback and test POST /api/posts/{id}/reprocess
         mocker.patch(
