@@ -21,7 +21,7 @@ async def test_frontend_static_files_exist():
 
     # JS files
     js_dir = static_dir / "js"
-    for js_file in ["app.js", "api.js", "toast.js", "video-player.js", "cards.js", "queue.js", "published.js", "modal.js", "topics.js", "settings.js"]:
+    for js_file in ["app.js", "api.js", "auth.js", "toast.js", "video-player.js", "cards.js", "queue.js", "published.js", "modal.js", "topics.js", "settings.js"]:
         assert (js_dir / js_file).is_file(), f"Missing JS file: {js_file}"
 
 

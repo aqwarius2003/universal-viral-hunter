@@ -58,11 +58,12 @@
             Собрать твиты (Scout)
           </button>
           
-          <div class="user-profile-badge">
+          <div id="user-profile-badge" class="user-profile-badge" style="display:none;">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-            <span>Админ</span>
-            <button class="btn btn-sm" onclick="window.handleLogout()" title="Выйти" style="padding: 2px 6px; font-size: 0.7rem; margin-left: 4px;">
-              ⎋
+            <strong id="header-username">User</strong>
+            <span id="header-role-badge" class="user-role-tag role-admin">Админ</span>
+            <button class="btn btn-sm" onclick="window.handleLogout()" title="Выйти из системы" style="padding: 2px 6px; font-size: 0.7rem; margin-left: 4px;">
+              ⎋ Выйти
             </button>
           </div>
         </div>
@@ -347,6 +348,31 @@
             <button type="button" class="btn btn-sm" onclick="window.closeTopicModal()">Отмена</button>
             <button type="submit" class="btn btn-sm btn-primary">Сохранить топик</button>
           </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOGIN MODAL -->
+  <div class="modal-backdrop" id="login-modal">
+    <div class="modal-dialog" style="max-width: 400px;">
+      <div class="modal-header">
+        <h3 class="modal-title">🔐 Авторизация</h3>
+      </div>
+      <div class="modal-body">
+        <div id="login-error-box" class="auth-alert-box" style="display:none;"></div>
+        <form id="login-form" onsubmit="window.handleLoginSubmit(event)">
+          <div class="form-group">
+            <label class="form-label" for="login-username">Имя пользователя</label>
+            <input type="text" class="form-control" id="login-username" required placeholder="admin" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="login-password">Пароль</label>
+            <input type="password" class="form-control" id="login-password" required placeholder="••••••••" autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn btn-primary" id="btn-login-submit" style="width: 100%; justify-content: center; padding: 10px; margin-top: 8px;">
+            <span>Войти в систему</span>
+          </button>
         </form>
       </div>
     </div>

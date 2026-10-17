@@ -45,6 +45,12 @@ export const api = {
         data = await res.text();
       }
 
+      if (res.status === 401) {
+        if (typeof window.openLoginModal === 'function') {
+          window.openLoginModal();
+        }
+      }
+
       if (!res.ok) {
         const errorMsg = (data && data.error) ? data.error : (data && data.detail) ? data.detail : `HTTP ${res.status}: ${res.statusText}`;
         throw new Error(errorMsg);

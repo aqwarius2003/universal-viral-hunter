@@ -109,3 +109,13 @@
   gap: 10px;
   margin-top: 6px;
 }
+
+.auth-alert-box {
+  padding: 10px 14px;
+  background: rgba(231, 76, 60, 0.15);
+  border: 1px solid rgba(231, 76, 60, 0.4);
+  color: #fca5a5;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  margin-bottom: 12px;
+}

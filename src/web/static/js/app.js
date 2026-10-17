@@ -7,6 +7,7 @@ import { loadQueue } from './queue.js';
 import { loadPublished } from './published.js';
 import { loadTopics } from './topics.js';
 import { loadSettings } from './settings.js';
+import { checkAuthAndInit, handleLogout } from './auth.js';
 
 let currentTab = 'queue';
 let currentViewMode = localStorage.getItem('vh_view_mode') || 'grid';
@@ -99,25 +100,19 @@ async function updateStatuses() {
   }
 }
 
-export async function handleLogout() {
-  try {
-    await api.post('/api/auth/logout', {});
-    window.location.reload();
-  } catch (err) {
-    window.location.reload();
-  }
-}
-
 // Window bindings
 window.setViewMode = setViewMode;
 window.switchTab = switchTab;
 window.triggerPipeline = triggerPipeline;
-window.handleLogout = handleLogout;
 
 // DOM Ready initialization
 document.addEventListener('DOMContentLoaded', () => {
   setViewMode(currentViewMode);
-  loadQueue();
-  updateStatuses();
-  setInterval(updateStatuses, 10000);
+  
+  // Authenticate first, then load data and start background refresh
+  checkAuthAndInit(() => {
+    loadQueue();
+    updateStatuses();
+    setInterval(updateStatuses, 10000);
+  });
 });
