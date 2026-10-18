@@ -662,6 +662,96 @@ def cmd_backup(args: argparse.Namespace) -> None:
     print_success(f"Резервная копия успешно сохранена: {local_file.resolve()}")
 
 
+def cmd_reset_content(args: argparse.Namespace) -> None:
+    """Safely clears content data (tweets, digests, video cache) while preserving settings, topics, users, schedules."""
+    is_local = getattr(args, "local", False)
+    auto_yes = getattr(args, "yes", False)
+
+    target_name = "локальной системе" if is_local else "удаленном сервере"
+    print_header(f"Очистка контента и кеша ({target_name})")
+
+    print_warning(
+        "ВНИМАНИЕ: Будут удалены все твиты, саммари, дайджесты, история пайплайна и видеофайлы в data/video-temp.\n"
+        "  Настройки системы, топики (поисковые запросы), пользователи и расписания БУДУТ СОХРАНЕНЫ."
+    )
+
+    if not auto_yes:
+        confirm = input("👉 Вы уверены, что хотите начать с чистого листа? (y/N): ").strip().lower()
+        if confirm not in ("y", "yes", "д", "да"):
+            print_info("Операция отменена пользователем.")
+            return
+
+    if is_local:
+        import asyncio
+        from src.db import clear_all_content_data
+        from src.utils.video_manager import clear_all_cached_videos
+
+        print_info("Очистка локальной базы SQLite...")
+        counts = asyncio.run(clear_all_content_data())
+        for tbl, cnt in counts.items():
+            print(f"  • Удалено из {tbl}: {cnt}")
+
+        print_info("Очистка локального кеша видео (data/video-temp)...")
+        v_count = clear_all_cached_videos()
+        print_success(f"Локальный сброс успешно завершен! Удалено видеофайлов: {v_count}")
+    else:
+        conn = resolve_connection(args)
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        print_info(f"Создание точки восстановления перед очисткой на {conn['target']}...")
+        backup_cmd = (
+            f"set -e; cd {conn['remote_dir']}; "
+            f"mkdir -p data/backups; "
+            f"tar -czf data/backups/data-pre-reset-{stamp}.tar.gz -C data tweets.sqlite video-temp 2>/dev/null || true"
+        )
+        run_ssh(conn, backup_cmd, check=False)
+
+        print_info("Запуск безопасной очистки контента на сервере...")
+        reset_py_code = (
+            "import asyncio, json; "
+            "from src.db import clear_all_content_data; "
+            "from src.utils.video_manager import clear_all_cached_videos; "
+            "counts = asyncio.run(clear_all_content_data()); "
+            "videos = clear_all_cached_videos(); "
+            "print('RESULT_JSON:' + json.dumps({'tables': counts, 'videos': videos}))"
+        )
+        remote_reset_cmd = (
+            f"cd {conn['remote_dir']} && "
+            f"docker compose exec -T viral-hunter python -c \"{reset_py_code}\""
+        )
+        res = run_ssh(conn, remote_reset_cmd, stream=False, check=False)
+        stdout = res.stdout if res else ""
+        if res.returncode != 0:
+            print_warning("Контейнер вернул код ошибки, выполняем очистку базы напрямую...")
+            direct_py_cmd = (
+                f"cd {conn['remote_dir']} && "
+                f"python3 -c \"{reset_py_code}\" 2>/dev/null || "
+                f"python -c \"{reset_py_code}\""
+            )
+            res = run_ssh(conn, direct_py_cmd, stream=False, check=True)
+            stdout = res.stdout or ""
+
+        result_json_line = None
+        for line in stdout.splitlines():
+            if "RESULT_JSON:" in line:
+                result_json_line = line.split("RESULT_JSON:", 1)[1].strip()
+                break
+
+        if result_json_line:
+            try:
+                data = json.loads(result_json_line)
+                tables = data.get("tables", {})
+                for tbl, cnt in tables.items():
+                    print(f"  • Очищено записей из {tbl}: {cnt}")
+                print(f"  • Удалено кешированных видеофайлов: {data.get('videos', 0)}")
+            except Exception:
+                print(stdout)
+        else:
+            print(stdout)
+
+        print_success(f"Сервер {conn['target']} успешно сброшен на чистый лист!")
+        print_info("Все настройки системы, токены, топики и пользователи сохранены в целости.")
+
+
 def cmd_config(args: argparse.Namespace) -> None:
     """Displays or resets current deploy configuration."""
     config = load_config()
@@ -722,6 +812,11 @@ def build_parser() -> argparse.ArgumentParser:
     # backup
     subparsers.add_parser("backup", help="Скачать резервную копию базы данных SQLite на локальный ПК")
 
+    # reset-content
+    sp_reset = subparsers.add_parser("reset-content", help="Очистить все твиты, дайджесты и кеш видео (чистый лист), сохранив настройки")
+    sp_reset.add_argument("-y", "--yes", action="store_true", help="Пропустить подтверждение операции")
+    sp_reset.add_argument("--local", action="store_true", help="Выполнить сброс локально, а не на сервере")
+
     # config
     sp_cfg = subparsers.add_parser("config", help="Показать или сбросить сохраненные настройки подключения")
     sp_cfg.add_argument("--reset", action="store_true", help="Сбросить сохраненную конфигурацию")
@@ -755,6 +850,7 @@ def main() -> None:
         "restart": cmd_restart,
         "stop": cmd_stop,
         "backup": cmd_backup,
+        "reset-content": cmd_reset_content,
         "config": cmd_config,
         "version": cmd_version,
     }

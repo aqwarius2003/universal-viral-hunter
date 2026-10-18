@@ -1427,6 +1427,48 @@ async def cleanup_expired_posts(ttl_days: int) -> int:
         await db.commit()
         return cur.rowcount
 
+async def clear_all_content_data() -> Dict[str, int]:
+    """
+    Clears all content-related data (tweets, digests, pipeline runs) from SQLite,
+    freeing database space and resetting tweet deduplication / video hashes.
+    
+    STRICTLY PRESERVES all configuration and system tables:
+    - topics
+    - system_settings
+    - users
+    - digest_schedules
+    """
+    await init_db()
+    counts: Dict[str, int] = {}
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute("PRAGMA foreign_keys = OFF;")
+        
+        tables_to_clear = [
+            "digest_posts",
+            "digest_items",
+            "digests",
+            "daily_digests",
+            "pipeline_runs",
+            "tweets",
+        ]
+        
+        for table in tables_to_clear:
+            try:
+                cur = await db.execute(f"SELECT COUNT(*) FROM {table}")
+                row = await cur.fetchone()
+                counts[table] = int(row[0]) if row else 0
+                await db.execute(f"DELETE FROM {table}")
+            except Exception as e:
+                print(f"⚠️ Ошибка очистки таблицы {table}: {e}")
+                counts[table] = 0
+            
+        await db.commit()
+        await db.execute("PRAGMA foreign_keys = ON;")
+        await db.execute("VACUUM;")
+        await db.commit()
+        
+    return counts
+
 def normalize_to_utc_iso(dt_input: Any = None) -> str:
     """Normalizes any datetime or ISO string to strict UTC ISO-8601 string ending with 'Z'."""
     if dt_input is None:

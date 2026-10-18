@@ -214,3 +214,24 @@ def delete_cached_video(tweet_id: str) -> bool:
             print(f"⚠️ Error deleting cached video {file_path}: {e}")
             
     return deleted
+
+
+def clear_all_cached_videos() -> int:
+    """
+    Purges all cached video and thumbnail files from data/video-temp.
+    Returns the count of deleted files.
+    """
+    if not VIDEO_TEMP_DIR.exists():
+        return 0
+    count = 0
+    for file_path in VIDEO_TEMP_DIR.iterdir():
+        try:
+            if file_path.is_file():
+                file_path.unlink()
+                count += 1
+        except Exception as e:
+            print(f"⚠️ Error deleting {file_path}: {e}")
+    if count > 0:
+        print(f"🧹 Очищено всех кешированных видеофайлов: {count}")
+    return count
+

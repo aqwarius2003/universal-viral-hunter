@@ -2013,6 +2013,27 @@ async def handle_system_history_delete(request: web.Request) -> web.Response:
     return web.json_response({"status": "success", "deleted": deleted_count})
 
 
+async def handle_system_reset_content(request: web.Request) -> web.Response:
+    """Cleans all content data (tweets, digests, video cache) while preserving settings, topics, users, schedules."""
+    user = request.get("user")
+    if not user or user.get("role") != "admin":
+        return web.json_response({"error": "Admin required"}, status=403)
+        
+    from src.db import clear_all_content_data
+    from src.utils.video_manager import clear_all_cached_videos
+    
+    db_counts = await clear_all_content_data()
+    files_deleted = clear_all_cached_videos()
+    
+    return web.json_response({
+        "status": "success",
+        "cleared_tables": db_counts,
+        "cached_videos_deleted": files_deleted,
+        "message": "All content and video caches cleared. System settings and topics preserved."
+    })
+
+
+
 async def handle_get_topics(request: web.Request) -> web.Response:
     from src.db import get_topics
     topics = await get_topics()
@@ -2179,6 +2200,7 @@ def create_app() -> web.Application:
     app.router.add_get("/api/system/export/status", handle_system_export_status)
     app.router.add_get("/api/system/export/download", handle_system_export_download)
     app.router.add_delete("/api/system/history", handle_system_history_delete)
+    app.router.add_post("/api/system/reset-content", handle_system_reset_content)
 
     # Posts & Workflow
     app.router.add_get("/api/posts/queue", handle_get_queue)
