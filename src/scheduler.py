@@ -200,6 +200,13 @@ async def system_maintenance_loop() -> None:
             deleted = await cleanup_expired_posts(ttl_days)
             if deleted > 0:
                 log_event(f"🧹 Автоочистка (TTL {ttl_days} дн.): удалено {deleted} старых постов.")
+
+            # Clean stale temporary video files
+            try:
+                from src.utils.video_manager import cleanup_old_videos
+                cleanup_old_videos()
+            except Exception as ve:
+                log_event(f"⚠️ Ошибка очистки видео-кэша: {ve}")
             
             # 2. Resource Monitoring
             emergency = False
@@ -229,6 +236,17 @@ async def system_maintenance_loop() -> None:
                 # Emergency aggressive cleanup (14 days)
                 deleted_em = await cleanup_expired_posts(14)
                 log_event(f"🧹 Экстренная очистка: удалено {deleted_em} постов.")
+                try:
+                    from src.utils.video_manager import VIDEO_TEMP_DIR
+                    if VIDEO_TEMP_DIR.exists():
+                        for vf in VIDEO_TEMP_DIR.glob("*.*"):
+                            try:
+                                vf.unlink()
+                            except Exception:
+                                pass
+                        log_event("🧹 Экстренная очистка: временные видеофайлы удалены.")
+                except Exception:
+                    pass
                 
         except asyncio.CancelledError:
             break

@@ -523,14 +523,19 @@ def cmd_deploy(args: argparse.Namespace) -> None:
             f"  ufw allow 443/tcp 2>/dev/null || true; "
             f"  ufw allow 8000/tcp 2>/dev/null || true; "
             f"fi; "
+            f"find {remote_dir}/data/video-temp -type f -mtime +1 -delete 2>/dev/null || true; "
+            f"find {remote_dir}/data/video-temp -type f -size +50M -delete 2>/dev/null || true; "
+            f"docker container prune -f 2>/dev/null || true; "
+            f"docker builder prune -f 2>/dev/null || true; "
+            f"docker image prune -a -f --filter 'until=24h' 2>/dev/null || true; "
             f"docker ps -a --filter 'name=viral-hunter' -q | xargs -r docker rm -f 2>/dev/null || true; "
-            f"docker image prune -f 2>/dev/null || true; "
             f"if docker compose version >/dev/null 2>&1; then "
             f"  docker compose up -d --build --remove-orphans; "
             f"else "
             f"  docker-compose up -d --build --remove-orphans; "
             f"fi; "
-            f"docker image prune -f 2>/dev/null || true"
+            f"docker image prune -f 2>/dev/null || true; "
+            f"docker builder prune -f 2>/dev/null || true"
         )
         run_ssh(conn, deploy_cmd)
 
