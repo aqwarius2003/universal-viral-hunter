@@ -1,6 +1,6 @@
 [project]
 name = "viral-hunter"
-version = "0.1.0"
+version = "2.2.0"
 description = "Viral Hunter with LangGraph"
 authors = [
     {name = "aqwarius2003",email = "00victorr@gmail.com"}
@@ -15,6 +15,7 @@ dependencies = [
     "google-genai (>=2.23.0,<3.0.0)",
     "twifork (>=2.4.0,<3.0.0)",
     "playwright (>=1.40.0,<2.0.0)",
+    "pillow (>=13.0.0,<14.0.0)",
 ]
 
 

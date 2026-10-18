@@ -6,6 +6,13 @@ from urllib.parse import urlparse
 from typing import List, Dict, Any, Optional
 
 from src.config import settings
+from src.utils.video_hasher import (
+    compute_video_fingerprint,
+    compute_image_dhash,
+    compute_image_dhash_from_url,
+    hamming_distance,
+    is_fingerprint_duplicate
+)
 
 VIDEO_TEMP_DIR = Path("data/video-temp")
 

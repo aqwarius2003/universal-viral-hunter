@@ -39,6 +39,7 @@ async def init_db() -> None:
                 digest_id INTEGER,
                 topic_id INTEGER,
                 video_data TEXT,
+                video_hash TEXT,
                 admin_message_id INTEGER
             );
         """)
@@ -158,6 +159,8 @@ async def init_db() -> None:
                     await db.execute("ALTER TABLE tweets ADD COLUMN topic_id INTEGER REFERENCES topics(id)")
                 if "video_data" not in cols:
                     await db.execute("ALTER TABLE tweets ADD COLUMN video_data TEXT")
+                if "video_hash" not in cols:
+                    await db.execute("ALTER TABLE tweets ADD COLUMN video_hash TEXT")
                 if "admin_message_id" not in cols:
                     await db.execute("ALTER TABLE tweets ADD COLUMN admin_message_id INTEGER")
 
@@ -193,6 +196,7 @@ async def init_db() -> None:
                         digest_id INTEGER,
                         topic_id INTEGER,
                         video_data TEXT,
+                        video_hash TEXT,
                         admin_message_id INTEGER
                     )
                 """)
@@ -203,7 +207,7 @@ async def init_db() -> None:
                     "created_at", "likes_count", "reposts_count", "quotes_count", "bookmarks_count",
                     "impressions_count", "viral_score", "impact_score", "is_viral", "media_urls",
                     "summary_json", "status", "scheduled_at", "queue_order", "posted_at",
-                    "inserted_at", "digest_id", "topic_id", "video_data", "admin_message_id"
+                    "inserted_at", "digest_id", "topic_id", "video_data", "video_hash", "admin_message_id"
                 ]
                 common_cols = [col for col in target_cols if col in legacy_cols]
                 cols_str = ", ".join(common_cols)
@@ -216,6 +220,7 @@ async def init_db() -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_viral_status ON tweets(is_viral, status);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON tweets(created_at);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_queue_order ON tweets(queue_order, scheduled_at);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_tweets_video_hash ON tweets(video_hash);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_pipeline_runs_id ON pipeline_runs(id DESC);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_digest_items_digest ON digest_items(digest_id);")
@@ -399,21 +404,113 @@ async def delete_topic(topic_id: int) -> None:
         await db.execute("DELETE FROM topics WHERE id = ?", (topic_id,))
         await db.commit()
 
+async def find_duplicate_video_in_db(
+    video_hash: str,
+    max_distance: int = 4,
+    exclude_tweet_id: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Searches SQLite for any existing tweet with a matching or perceptually identical video hash.
+    Checks exact match first via indexed lookup, then evaluates Hamming distance across stored fingerprints.
+    """
+    if not video_hash:
+        return None
+
+    from src.utils.video_hasher import is_fingerprint_duplicate
+
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+
+        # 1. Exact match fast path (indexed)
+        query_exact = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash = ?"
+        params: List[Any] = [video_hash]
+        if exclude_tweet_id:
+            query_exact += " AND tweet_id != ?"
+            params.append(exclude_tweet_id)
+        query_exact += " LIMIT 1"
+
+        async with db.execute(query_exact, params) as cursor:
+            exact_row = await cursor.fetchone()
+            if exact_row:
+                return dict(exact_row)
+
+        # 2. Perceptual match scan across all stored video fingerprints
+        query_all = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash IS NOT NULL"
+        params_all: List[Any] = []
+        if exclude_tweet_id:
+            query_all += " AND tweet_id != ?"
+            params_all.append(exclude_tweet_id)
+
+        async with db.execute(query_all, params_all) as cursor:
+            rows = await cursor.fetchall()
+            for r in rows:
+                db_hash = r["video_hash"]
+                if db_hash and is_fingerprint_duplicate(video_hash, db_hash, max_distance=max_distance):
+                    return dict(r)
+
+    return None
+
+
 async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filters out tweets that already exist in the database."""
+    """
+    Filters out tweets that already exist in the database by ID or contain duplicate video
+    matching any existing tweet (even across different authors / tweet IDs).
+    """
     if not tweets:
         return []
-    
-    new_tweets = []
+
+    new_tweets: List[Dict[str, Any]] = []
+    seen_batch_hashes: List[Tuple[str, str]] = []  # (video_hash, tweet_id)
+    from src.utils.video_manager import delete_cached_video
+    from src.utils.video_hasher import is_fingerprint_duplicate
+
     async with aiosqlite.connect(settings.db_path) as db:
         for tweet in tweets:
+            tweet_id = tweet.get("tweet_id")
+
+            # 1. Check tweet ID uniqueness in DB
             async with db.execute(
-                "SELECT 1 FROM tweets WHERE tweet_id = ?", (tweet["tweet_id"],)
+                "SELECT 1 FROM tweets WHERE tweet_id = ?", (tweet_id,)
             ) as cursor:
                 exists = await cursor.fetchone()
-                if not exists:
-                    new_tweets.append(tweet)
+                if exists:
+                    continue
+
+            # 2. Check video fingerprint deduplication
+            v_hash = tweet.get("video_hash")
+            is_video_dup = False
+            if v_hash:
+                # Check against existing tweets in DB
+                db_dup = await find_duplicate_video_in_db(v_hash, exclude_tweet_id=tweet_id)
+                if db_dup:
+                    print(
+                        f"🚫 [Scout] Дубликат видео отсеян: твит {tweet_id} ({tweet.get('author_handle')}) "
+                        f"содержит видео, идентичное {db_dup['tweet_id']} ({db_dup.get('author_handle')}, "
+                        f"статус: {db_dup.get('status')}, {db_dup.get('tweet_url')})"
+                    )
+                    if tweet_id:
+                        delete_cached_video(tweet_id)
+                    is_video_dup = True
+                else:
+                    # Check against other tweets in the same incoming batch
+                    for prev_hash, prev_id in seen_batch_hashes:
+                        if is_fingerprint_duplicate(v_hash, prev_hash):
+                            print(
+                                f"🚫 [Scout] Дубликат видео в текущей пачке: твит {tweet_id} "
+                                f"дублирует {prev_id}. Пропускаем."
+                            )
+                            if tweet_id:
+                                delete_cached_video(tweet_id)
+                            is_video_dup = True
+                            break
+
+            if not is_video_dup:
+                if v_hash and tweet_id:
+                    seen_batch_hashes.append((v_hash, tweet_id))
+                new_tweets.append(tweet)
+
     return new_tweets
+
 
 async def save_raw_tweets(tweets: List[Dict[str, Any]]) -> None:
     """Saves new raw tweets to the database to prevent future duplicates."""
@@ -424,14 +521,15 @@ async def save_raw_tweets(tweets: List[Dict[str, Any]]) -> None:
         for tweet in tweets:
             media_urls_json = json.dumps(tweet.get("media_urls", []))
             video_data_json = json.dumps(tweet.get("video_data", {})) if tweet.get("video_data") else None
+            video_hash = tweet.get("video_hash")
             await db.execute(
                 """
                 INSERT INTO tweets (
                     tweet_id, author_handle, author_name, text_raw, tweet_url, 
                     created_at, likes_count, reposts_count, quotes_count, 
                     bookmarks_count, impressions_count, viral_score, status, media_urls,
-                    topic_id, video_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    topic_id, video_data, video_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tweet["tweet_id"], tweet["author_handle"], tweet.get("author_name", tweet["author_handle"]),
@@ -439,7 +537,7 @@ async def save_raw_tweets(tweets: List[Dict[str, Any]]) -> None:
                     tweet.get("likes_count", 0), tweet.get("reposts_count", 0),
                     tweet.get("quotes_count", 0), tweet.get("bookmarks_count", 0),
                     tweet.get("impressions_count", 0), 0.0, 'RAW', media_urls_json,
-                    tweet.get("topic_id"), video_data_json
+                    tweet.get("topic_id"), video_data_json, video_hash
                 )
             )
         await db.commit()

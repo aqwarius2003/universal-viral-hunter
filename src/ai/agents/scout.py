@@ -28,7 +28,13 @@ except ImportError:
 from src.ai.agents.state import AgentState
 from src.config import settings
 from src.db import filter_new_tweets, save_raw_tweets, get_active_topics
-from src.utils.video_manager import download_video, select_best_variant, get_max_quality
+from src.utils.video_manager import (
+    download_video,
+    select_best_variant,
+    get_max_quality,
+    compute_video_fingerprint,
+    compute_image_dhash_from_url
+)
 
 
 def safe_print(message: str) -> None:
@@ -518,16 +524,43 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
                 video_info = extract_video_info(tweet)
                 
                 video_data = None
+                video_hash = None
                 if video_info and video_info.get("variants"):
                     best_variant = select_best_variant(video_info["variants"], max_quality)
                     if best_variant:
                         local_path = await download_video(tweet_id_str, best_variant)
+                        # Compute perceptual video fingerprint
+                        duration_sec = None
+                        if video_info.get("duration"):
+                            try:
+                                d_val = float(video_info["duration"])
+                                duration_sec = d_val / 1000.0 if d_val > 100 else d_val
+                            except Exception:
+                                duration_sec = None
+
+                        video_hash = compute_video_fingerprint(
+                            video_path=local_path,
+                            duration_sec=duration_sec
+                        )
+                        if not video_hash and video_info.get("thumbnail"):
+                            video_hash = await compute_image_dhash_from_url(video_info["thumbnail"])
+
                         video_data = {
                             "original_url": best_variant,
                             "thumbnail": video_info.get("thumbnail"),
                             "duration": video_info.get("duration"),
-                            "local_path": local_path
+                            "local_path": local_path,
+                            "fingerprint": video_hash
                         }
+                elif video_info and video_info.get("thumbnail"):
+                    video_hash = await compute_image_dhash_from_url(video_info["thumbnail"])
+                    video_data = {
+                        "original_url": None,
+                        "thumbnail": video_info.get("thumbnail"),
+                        "duration": video_info.get("duration"),
+                        "local_path": None,
+                        "fingerprint": video_hash
+                    }
 
                 fetched_tweets.append({
                     "tweet_id": tweet_id_str,
@@ -544,6 +577,7 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
                     "media_urls": media_urls,
                     "topic_id": topic_id,
                     "video_data": video_data,
+                    "video_hash": video_hash,
                 })
 
     if os.environ.get("TESTING") != "true":

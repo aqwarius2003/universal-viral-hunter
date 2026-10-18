@@ -12,6 +12,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install poetry
