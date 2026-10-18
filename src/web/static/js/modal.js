@@ -197,8 +197,11 @@ export function showConfirmDialog({ title, message, confirmText = 'Удалит�
     btnConfirm.innerText = confirmText;
     pendingConfirmCallback = onConfirm;
     btnConfirm.onclick = () => {
+      const cb = pendingConfirmCallback;
       closeConfirmModal();
-      if (pendingConfirmCallback) pendingConfirmCallback();
+      if (typeof cb === 'function') {
+        cb();
+      }
     };
   }
 
