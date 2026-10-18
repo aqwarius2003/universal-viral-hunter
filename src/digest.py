@@ -556,6 +556,11 @@ async def run_daily_digest(slot_id: Optional[str] = None, is_test: bool = False)
                 await delete_admin_moderation_message(super_tweet["tweet_id"])
             except Exception:
                 pass
+            try:
+                from src.utils.video_manager import delete_cached_video
+                delete_cached_video(super_tweet["tweet_id"])
+            except Exception:
+                pass
             super_tweet["status"] = "POSTED"
             safe_print("✅ Супер-виральная новость успешно опубликована отдельным постом.")
         else:

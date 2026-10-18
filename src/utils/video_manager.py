@@ -147,3 +147,22 @@ def cleanup_old_videos():
                     
     if count > 0:
         print(f"🧹 Очищено старых видеофайлов: {count}")
+
+
+def delete_cached_video(tweet_id: str) -> bool:
+    """
+    Deletes cached video file(s) and thumbnails for a given tweet_id immediately from disk.
+    """
+    if not VIDEO_TEMP_DIR.exists() or not tweet_id:
+        return False
+        
+    deleted = False
+    for file_path in VIDEO_TEMP_DIR.glob(f"{tweet_id}*"):
+        try:
+            if file_path.is_file():
+                file_path.unlink()
+                deleted = True
+        except Exception as e:
+            print(f"⚠️ Error deleting cached video {file_path}: {e}")
+            
+    return deleted

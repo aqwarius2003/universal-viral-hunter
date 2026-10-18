@@ -433,6 +433,13 @@ async def handle_publish_now(request: web.Request) -> web.Response:
             await send_post_to_channel(formatted_text, tweet_url)
 
         await mark_post_published(tweet_id)
+        # Immediate disk cleanup: purge temporary video cache
+        try:
+            from src.utils.video_manager import delete_cached_video
+            delete_cached_video(tweet_id)
+        except Exception:
+            pass
+
         # Inbox Zero: delete moderation card from admin's Telegram chat
         try:
             await delete_admin_moderation_message(tweet_id)
@@ -536,10 +543,15 @@ async def handle_reprocess_post(request: web.Request) -> web.Response:
 
 
 async def handle_delete_post(request: web.Request) -> web.Response:
-    """Cancels and archives a post, removing it from admin Telegram."""
+    """Cancels and archives a post, removing it from admin Telegram and purging cached media."""
     tweet_id = request.match_info["id"]
     await init_db()
     await cancel_scheduled_post(tweet_id)
+    try:
+        from src.utils.video_manager import delete_cached_video
+        delete_cached_video(tweet_id)
+    except Exception as ve:
+        print(f"Failed to delete cached video for {tweet_id}: {ve}")
     try:
         await delete_admin_moderation_message(tweet_id)
     except Exception as e:

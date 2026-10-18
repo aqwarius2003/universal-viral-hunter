@@ -376,6 +376,11 @@ async def _publish_approved_post(tweet_id: str, custom_comment: str = None, bot:
 
     # Automatically delete card from admin's moderation chat (Inbox Zero!)
     await delete_admin_moderation_message(tweet_id)
+    try:
+        from src.utils.video_manager import delete_cached_video
+        delete_cached_video(tweet_id)
+    except Exception:
+        pass
     return "✅ Пост успешно опубликован в канал!"
 
 
@@ -410,6 +415,11 @@ async def handle_reject(callback: types.CallbackQuery):
             impact_score=ai_data.get("impact_score", 0),
             summary_json=json.dumps(ai_data, ensure_ascii=False)
         )
+        try:
+            from src.utils.video_manager import delete_cached_video
+            delete_cached_video(tweet_id)
+        except Exception:
+            pass
         try:
             await callback.message.delete()
         except Exception:

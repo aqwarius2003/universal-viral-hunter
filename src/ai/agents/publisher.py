@@ -303,6 +303,11 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
         elif not is_approval:
             # If directly published to channel, ensure any previous admin moderation card is deleted
             await delete_admin_moderation_message(draft["tweet_id"])
+            try:
+                from src.utils.video_manager import delete_cached_video
+                delete_cached_video(draft["tweet_id"])
+            except Exception:
+                pass
 
         # 3. Update DB status. If moderation, mark as STAGING/PENDING, else POSTED
         new_status = "PENDING_APPROVAL" if (is_approval and admin_id) else "POSTED"
@@ -423,6 +428,11 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
         try:
             await delete_admin_moderation_message(top_draft["tweet_id"])
         except Exception as del_err:
+            pass
+        try:
+            from src.utils.video_manager import delete_cached_video
+            delete_cached_video(top_draft["tweet_id"])
+        except Exception:
             pass
     else:
         top_draft["status"] = "POSTED"
