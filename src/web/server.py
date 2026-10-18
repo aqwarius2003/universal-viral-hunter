@@ -442,7 +442,7 @@ async def handle_publish_now(request: web.Request) -> web.Response:
 
         # Inbox Zero: delete moderation card from admin's Telegram chat
         try:
-            await delete_admin_moderation_message(tweet_id)
+            await delete_admin_moderation_message(tweet_id, action="published")
         except Exception as e:
             print(f"Failed to delete admin card for {tweet_id}: {e}")
 
@@ -553,7 +553,7 @@ async def handle_delete_post(request: web.Request) -> web.Response:
     except Exception as ve:
         print(f"Failed to delete cached video for {tweet_id}: {ve}")
     try:
-        await delete_admin_moderation_message(tweet_id)
+        await delete_admin_moderation_message(tweet_id, action="deleted")
     except Exception as e:
         print(f"Failed to delete admin card for {tweet_id}: {e}")
     return web.json_response({"status": "cancelled", "tweet_id": tweet_id})
@@ -2188,6 +2188,7 @@ def create_app() -> web.Application:
     app.router.add_post("/api/posts/reorder", handle_reorder_queue)
     app.router.add_post("/api/queue/batch-reprocess", handle_batch_reprocess_queue)
     app.router.add_post("/api/posts/{id}/publish_now", handle_publish_now)
+    app.router.add_post("/api/posts/{id}/publish", handle_publish_now)
     app.router.add_post("/api/posts/{id}/edit", handle_edit_post)
     app.router.add_post("/api/posts/{id}/reprocess", handle_reprocess_post)
     app.router.add_post("/api/posts/{id}/generate_summary", handle_generate_summary)

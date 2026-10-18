@@ -302,7 +302,7 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
             await save_tweet_admin_message_id(draft["tweet_id"], sent_msg_id)
         elif not is_approval:
             # If directly published to channel, ensure any previous admin moderation card is deleted
-            await delete_admin_moderation_message(draft["tweet_id"])
+            await delete_admin_moderation_message(draft["tweet_id"], action="published")
             try:
                 from src.utils.video_manager import delete_cached_video
                 delete_cached_video(draft["tweet_id"])
@@ -426,7 +426,7 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
             summary_json=json.dumps(summary_data, ensure_ascii=False),
         )
         try:
-            await delete_admin_moderation_message(top_draft["tweet_id"])
+            await delete_admin_moderation_message(top_draft["tweet_id"], action="published")
         except Exception as del_err:
             pass
         try:

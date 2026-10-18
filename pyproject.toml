@@ -1,6 +1,6 @@
 [project]
 name = "viral-hunter"
-version = "2.2.1"
+version = "2.2.2"
 description = "Viral Hunter with LangGraph"
 authors = [
     {name = "aqwarius2003",email = "00victorr@gmail.com"}

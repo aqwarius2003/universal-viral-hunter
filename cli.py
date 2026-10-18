@@ -595,12 +595,17 @@ def cmd_logs(args: argparse.Namespace) -> None:
     """Streams live container logs from remote server."""
     conn = resolve_connection(args)
     tail = getattr(args, "tail", 100)
-    print_info(f"Подключение к логам {conn['target']} (tail={tail}, Ctrl+C для выхода)...")
+    follow = not getattr(args, "no_follow", False)
+    f_flag = "-f " if follow else ""
+    if follow:
+        print_info(f"Подключение к логам {conn['target']} (tail={tail}, Ctrl+C для выхода)...")
+    else:
+        print_info(f"Получение последних {tail} строк логов с {conn['target']}...")
     logs_cmd = (
         f"cd {conn['remote_dir']} && "
         f"if docker compose version >/dev/null 2>&1; then "
-        f"docker compose logs -f --tail={tail}; "
-        f"else docker-compose logs -f --tail={tail}; fi"
+        f"docker compose logs {f_flag}--tail={tail}; "
+        f"else docker-compose logs {f_flag}--tail={tail}; fi"
     )
     run_ssh(conn, logs_cmd)
 
@@ -706,6 +711,7 @@ def build_parser() -> argparse.ArgumentParser:
     # logs
     sp_logs = subparsers.add_parser("logs", help="Просмотр логов контейнера в реальном времени")
     sp_logs.add_argument("--tail", type=int, default=100, help="Количество последних строк лога")
+    sp_logs.add_argument("--no-follow", action="store_true", help="Разовый вывод без ожидания новых строк")
 
     # restart
     subparsers.add_parser("restart", help="Перезапустить приложение на сервере")

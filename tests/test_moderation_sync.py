@@ -142,3 +142,73 @@ async def test_handle_sync_command(monkeypatch):
             last_text = progress_msg.edit_text.call_args[0][0]
             assert "Всего в очереди: <b>2</b>" in last_text
             assert "Карточек отправлено админу: <b>2</b>" in last_text
+
+
+@pytest.mark.asyncio
+async def test_handle_reject_sets_ignored_and_cleans_video():
+    from src.telegram.moderation_bot import handle_reject
+
+    mock_callback = MagicMock()
+    mock_callback.data = "rej:tweet_test_99"
+    mock_callback.message = MagicMock()
+    mock_callback.message.delete = AsyncMock()
+    mock_callback.answer = AsyncMock()
+
+    mock_tweet = {
+        "tweet_id": "tweet_test_99",
+        "viral_score": 8.5,
+        "summary_json": json.dumps({"title_ru": "Тестовый заголовок", "impact_score": 8})
+    }
+
+    with patch("src.telegram.moderation_bot.get_tweet_by_id", new_callable=AsyncMock, return_value=mock_tweet):
+        with patch("src.telegram.moderation_bot.update_tweet_status_and_score", new_callable=AsyncMock) as mock_update:
+            with patch("src.telegram.moderation_bot.save_tweet_admin_message_id", new_callable=AsyncMock) as mock_save_msg:
+                with patch("src.utils.video_manager.delete_cached_video") as mock_del_video:
+                    await handle_reject(mock_callback)
+
+                    # Verify status is IGNORED (never REJECTED!)
+                    assert mock_update.called
+                    _, kwargs = mock_update.call_args
+                    assert kwargs["status"] == "IGNORED"
+
+                    # Verify admin_message_id is cleared
+                    assert mock_save_msg.called
+                    assert mock_save_msg.call_args[0] == ("tweet_test_99", None)
+
+                    # Verify cached video cleanup
+                    assert mock_del_video.called
+                    assert mock_del_video.call_args[0][0] == "tweet_test_99"
+
+                    # Verify telegram message delete and toast answer
+                    assert mock_callback.message.delete.called
+                    assert mock_callback.answer.called
+                    assert "отклонен" in mock_callback.answer.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_delete_admin_moderation_message_with_action(monkeypatch):
+    from src.telegram.moderation_bot import delete_admin_moderation_message
+
+    monkeypatch.setattr(settings, "telegram_admin_id", "777")
+    monkeypatch.setattr(settings, "telegram_bot_token", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
+
+    mock_bot = MagicMock()
+    mock_bot.delete_message = AsyncMock(side_effect=Exception("Message can't be deleted"))
+    mock_bot.edit_message_caption = AsyncMock()
+
+    with patch("src.telegram.moderation_bot.get_bot", return_value=mock_bot):
+        with patch("src.telegram.moderation_bot.get_tweet_admin_message_id", new_callable=AsyncMock, return_value=456):
+            with patch("src.telegram.moderation_bot.save_tweet_admin_message_id", new_callable=AsyncMock) as mock_save:
+                # Test deleted action marker
+                await delete_admin_moderation_message("tweet_123", action="deleted")
+                assert mock_bot.edit_message_caption.called
+                caption_text = mock_bot.edit_message_caption.call_args[1]["caption"]
+                assert "Отклонено" in caption_text
+
+                # Test published action marker
+                await delete_admin_moderation_message("tweet_123", action="published")
+                caption_text_pub = mock_bot.edit_message_caption.call_args[1]["caption"]
+                assert "Опубликовано" in caption_text_pub
+
+                assert mock_save.called
+

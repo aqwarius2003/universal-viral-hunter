@@ -84,7 +84,7 @@ def get_bot() -> Optional[Bot]:
     global _bot
     if not settings.telegram_bot_token or "your_bot_token" in settings.telegram_bot_token:
         return None
-    if _bot is None:
+    if _bot is None or getattr(_bot, "token", None) != settings.telegram_bot_token:
         _bot = Bot(token=settings.telegram_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     return _bot
 
@@ -124,7 +124,7 @@ def build_admin_keyboard(tweet_id: str, tweet_url: Optional[str] = None) -> Inli
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-async def delete_admin_moderation_message(tweet_id: str) -> None:
+async def delete_admin_moderation_message(tweet_id: str, action: str = "deleted") -> None:
     """
     Deletes the moderation card from the admin chat when published from Web UI, cron, or Telegram.
     Ensures admin's chat strictly mirrors the unposted queue ('Inbox Zero').
@@ -144,25 +144,30 @@ async def delete_admin_moderation_message(tweet_id: str) -> None:
         chat_target = normalize_channel_id(admin_id)
         await bot.delete_message(chat_id=chat_target, message_id=admin_msg_id)
     except Exception as e:
-        logger.debug(f"Could not delete admin message {admin_msg_id}: {e}")
+        logger.warning(f"Could not delete admin message {admin_msg_id} for tweet {tweet_id}: {e}")
         try:
-            # If deletion is impossible (e.g. > 48h), edit into a clean published marker
+            marker_text = (
+                "✅ <b>Опубликовано в канал.</b>"
+                if action == "published"
+                else "❌ <b>Отклонено и удалено из очереди.</b>"
+            )
+            # If deletion is impossible (e.g. > 48h), edit into a clean marker
             try:
                 await bot.edit_message_caption(
                     chat_id=normalize_channel_id(admin_id),
                     message_id=admin_msg_id,
-                    caption="✅ <b>Опубликовано в канал.</b>",
+                    caption=marker_text,
                     reply_markup=None,
                 )
             except Exception:
                 await bot.edit_message_text(
                     chat_id=normalize_channel_id(admin_id),
                     message_id=admin_msg_id,
-                    text="✅ <b>Опубликовано в канал.</b>",
+                    text=marker_text,
                     reply_markup=None,
                 )
-        except Exception:
-            pass
+        except Exception as edit_err:
+            logger.warning(f"Could not edit fallback message {admin_msg_id}: {edit_err}")
     finally:
         await save_tweet_admin_message_id(tweet_id, None)
 
@@ -375,7 +380,7 @@ async def _publish_approved_post(tweet_id: str, custom_comment: str = None, bot:
     )
 
     # Automatically delete card from admin's moderation chat (Inbox Zero!)
-    await delete_admin_moderation_message(tweet_id)
+    await delete_admin_moderation_message(tweet_id, action="published")
     try:
         from src.utils.video_manager import delete_cached_video
         delete_cached_video(tweet_id)
@@ -392,9 +397,20 @@ async def handle_publish(callback: types.CallbackQuery):
         # Delete the moderation message from chat so it disappears
         await callback.message.delete()
     except Exception:
-        pass
-    await callback.message.answer(res)
-    await callback.answer()
+        try:
+            await callback.message.edit_caption(
+                caption="✅ <b>Опубликовано в канал.</b>",
+                reply_markup=None,
+            )
+        except Exception:
+            try:
+                await callback.message.edit_text(
+                    text="✅ <b>Опубликовано в канал.</b>",
+                    reply_markup=None,
+                )
+            except Exception:
+                pass
+    await callback.answer(res, show_alert=False)
 
 
 @dp.callback_query(F.data.startswith("rej:"))
@@ -411,10 +427,11 @@ async def handle_reject(callback: types.CallbackQuery):
             tweet_id=tweet_id,
             score=tweet.get("viral_score", 0.0),
             is_viral=True,
-            status="REJECTED",
+            status="IGNORED",
             impact_score=ai_data.get("impact_score", 0),
             summary_json=json.dumps(ai_data, ensure_ascii=False)
         )
+        await save_tweet_admin_message_id(tweet_id, None)
         try:
             from src.utils.video_manager import delete_cached_video
             delete_cached_video(tweet_id)
@@ -423,11 +440,22 @@ async def handle_reject(callback: types.CallbackQuery):
         try:
             await callback.message.delete()
         except Exception:
-            pass
-        await callback.message.answer("❌ Пост отклонен и удален из очереди.")
+            try:
+                await callback.message.edit_caption(
+                    caption="❌ <b>Отклонено и удалено из очереди.</b>",
+                    reply_markup=None,
+                )
+            except Exception:
+                try:
+                    await callback.message.edit_text(
+                        text="❌ <b>Отклонено и удалено из очереди.</b>",
+                        reply_markup=None,
+                    )
+                except Exception:
+                    pass
+        await callback.answer("❌ Пост отклонен и удален из очереди.", show_alert=False)
     else:
         await callback.answer("Твит не найден.", show_alert=True)
-    await callback.answer()
 
 
 @dp.callback_query(F.data.startswith("cmt:"))

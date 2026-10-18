@@ -2,7 +2,7 @@
  * Queue Management Module
  */
 import { api } from './api.js';
-import { showToast } from './toast.js';
+import { showToast, escapeHtml } from './toast.js';
 import { renderPostCard } from './cards.js';
 
 export let queueData = [];
@@ -71,7 +71,7 @@ export async function movePost(tweetId, direction) {
 export async function publishNow(tweetId) {
   if (!confirm("Опубликовать этот пост в Telegram прямо сейчас?")) return;
   try {
-    await api.post(`/api/posts/${tweetId}/publish`, {});
+    await api.post(`/api/posts/${tweetId}/publish_now`, {});
     showToast("Пост успешно отправлен в Telegram!", "success");
     loadQueue();
   } catch (err) {
@@ -84,26 +84,34 @@ export function deletePost(tweetId) {
   const title = post ? (post.summary_data?.title_ru || post.text_raw?.slice(0, 50)) : '';
   const isVideo = Boolean(post && post.video_data);
 
+  const doDelete = async () => {
+    // Optimistic UI feedback: smoothly remove card immediately
+    const cardEl = document.querySelector(`.tg-card[data-id="${tweetId}"]`);
+    if (cardEl) {
+      cardEl.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+      cardEl.style.opacity = '0';
+      cardEl.style.transform = 'scale(0.95)';
+      setTimeout(() => cardEl.remove(), 200);
+    }
+    try {
+      await api.delete(`/api/posts/${tweetId}`);
+      showToast("Пост удален из очереди", "info");
+      loadQueue();
+    } catch (err) {
+      showToast("Ошибка при удалении: " + err.message, "error");
+      loadQueue();
+    }
+  };
+
   if (typeof window.showConfirmDialog === 'function') {
     window.showConfirmDialog({
       title: isVideo ? "🗑️ Удаление видеоролика" : "🗑️ Удаление публикации",
       message: `Вы действительно хотите удалить ${isVideo ? 'видеоролик' : 'публикацию'} <b>«${escapeHtml(title || 'Без названия')}»</b> из очереди? Это действие нельзя отменить.`,
       confirmText: "Да, удалить",
-      onConfirm: async () => {
-        try {
-          await api.delete(`/api/posts/${tweetId}`);
-          showToast("Пост удален из очереди", "info");
-          loadQueue();
-        } catch (err) {
-          showToast("Ошибка при удалении: " + err.message, "error");
-        }
-      }
+      onConfirm: doDelete
     });
   } else if (confirm("Удалить этот пост из очереди?")) {
-    api.delete(`/api/posts/${tweetId}`).then(() => {
-      showToast("Пост удален из очереди", "info");
-      loadQueue();
-    }).catch(err => showToast("Ошибка: " + err.message, "error"));
+    doDelete();
   }
 }
 
