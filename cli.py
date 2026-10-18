@@ -480,7 +480,7 @@ def cmd_deploy(args: argparse.Namespace) -> None:
         # Step 2: Backup remote data
         print_info("[2/5] Создание резервной копии данных на сервере...")
         backup_cmd = (
-            f"set -e; mkdir -p {remote_dir}/data/backups; "
+            f"set -e; docker system prune -af 2>/dev/null || true; mkdir -p {remote_dir}/data/backups; "
             f"if [ -d {remote_dir}/data ] && [ \"$(ls -A {remote_dir}/data 2>/dev/null)\" ]; then "
             f"tar --exclude=backups --exclude=video-temp -czf {remote_dir}/data/backups/data-{stamp}.tar.gz -C {remote_dir}/data . 2>/dev/null || true; "
             f"echo 'Резервная копия сохранена в data/backups/data-{stamp}.tar.gz'; "
@@ -525,17 +525,14 @@ def cmd_deploy(args: argparse.Namespace) -> None:
             f"fi; "
             f"find {remote_dir}/data/video-temp -type f -mtime +1 -delete 2>/dev/null || true; "
             f"find {remote_dir}/data/video-temp -type f -size +50M -delete 2>/dev/null || true; "
-            f"docker container prune -f 2>/dev/null || true; "
-            f"docker builder prune -f 2>/dev/null || true; "
-            f"docker image prune -a -f --filter 'until=24h' 2>/dev/null || true; "
+            f"docker system prune -af 2>/dev/null || true; "
             f"docker ps -a --filter 'name=viral-hunter' -q | xargs -r docker rm -f 2>/dev/null || true; "
             f"if docker compose version >/dev/null 2>&1; then "
             f"  docker compose up -d --build --remove-orphans; "
             f"else "
             f"  docker-compose up -d --build --remove-orphans; "
             f"fi; "
-            f"docker image prune -f 2>/dev/null || true; "
-            f"docker builder prune -f 2>/dev/null || true"
+            f"docker system prune -af 2>/dev/null || true"
         )
         run_ssh(conn, deploy_cmd)
 

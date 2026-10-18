@@ -33,7 +33,8 @@ from src.utils.video_manager import (
     select_best_variant,
     get_max_quality,
     compute_video_fingerprint,
-    compute_image_dhash_from_url
+    compute_image_dhash_from_url,
+    cleanup_old_videos
 )
 
 
@@ -612,6 +613,11 @@ async def scout_node(state: AgentState) -> Dict[str, Any]:
                 safe_print(f"ℹ️ Твит {tweet['tweet_id']} отклонен AI-фильтром релевантности.")
 
     await save_raw_tweets(relevant_tweets)
+    try:
+        cleanup_old_videos()
+    except Exception as clean_err:
+        safe_print(f"⚠️ Ошибка фоновой очистки видео: {clean_err}")
+
     return {"raw_tweets": relevant_tweets}
 
 

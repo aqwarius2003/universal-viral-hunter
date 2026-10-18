@@ -135,25 +135,66 @@ async def download_video(tweet_id: str, video_url: str) -> Optional[str]:
     return None
 
 def cleanup_old_videos():
-    """Deletes videos older than TTL days."""
+    """
+    Deletes videos older than TTL days, videos whose posts are already IGNORED or POSTED,
+    and enforces maximum total directory size limit (300MB) to prevent disk exhaustion.
+    """
     if not VIDEO_TEMP_DIR.exists():
         return
         
     ttl_days = get_ttl_days()
     cutoff_time = time.time() - (ttl_days * 86400)
     
+    # 1. Connect to SQLite to find stale posts (already posted or rejected)
+    import sqlite3
+    db_path = getattr(settings, "db_path", "data/tweets.sqlite")
+    stale_ids = set()
+    if os.path.exists(db_path):
+        try:
+            with sqlite3.connect(db_path, timeout=5) as conn:
+                cur = conn.cursor()
+                for r in cur.execute("SELECT tweet_id FROM tweets WHERE status IN ('IGNORED', 'POSTED')"):
+                    stale_ids.add(str(r[0]))
+        except Exception as e:
+            print(f"⚠️ Error querying stale tweets for video cleanup: {e}")
+
     count = 0
+    remaining_files = []
     for file_path in VIDEO_TEMP_DIR.glob("*.*"):
         if file_path.is_file():
-            if file_path.stat().st_mtime < cutoff_time:
+            tid = file_path.stem.split("_")[0]
+            # Delete if post is already IGNORED / POSTED, or file is older than TTL
+            is_stale = (tid in stale_ids) or (file_path.stat().st_mtime < cutoff_time)
+            if is_stale:
                 try:
                     file_path.unlink()
                     count += 1
                 except Exception as e:
                     print(f"⚠️ Error deleting {file_path}: {e}")
-                    
+            else:
+                remaining_files.append(file_path)
+
+    # 2. Safety cap: If remaining files exceed 300MB, remove oldest files first
+    MAX_VIDEO_CACHE_BYTES = 300 * 1024 * 1024  # 300 MB cap
+    try:
+        total_size = sum(f.stat().st_size for f in remaining_files if f.is_file())
+        if total_size > MAX_VIDEO_CACHE_BYTES:
+            remaining_files.sort(key=lambda f: f.stat().st_mtime)  # Oldest first
+            for f in remaining_files:
+                if total_size <= MAX_VIDEO_CACHE_BYTES:
+                    break
+                try:
+                    sz = f.stat().st_size
+                    f.unlink()
+                    total_size -= sz
+                    count += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"⚠️ Error enforcing video cache size cap: {e}")
+
     if count > 0:
-        print(f"🧹 Очищено старых видеофайлов: {count}")
+        print(f"🧹 Очищено неактуальных видеофайлов: {count}")
 
 
 def delete_cached_video(tweet_id: str) -> bool:
