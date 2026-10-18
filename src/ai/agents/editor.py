@@ -61,6 +61,15 @@ def get_ai_status() -> Dict[str, Any]:
     _ai_status["primary_model"] = settings.primary_model
     _ai_status["fallback_model"] = settings.fallback_model
     _ai_status["delay_setting"] = settings.ai_request_delay_seconds
+    
+    # If state is still pending but we have a valid key configured, mark ready
+    if _ai_status.get("status") == "pending":
+        key = getattr(settings, "ai_api_key", None)
+        from src.db import is_secret_placeholder_or_empty
+        if key and not is_secret_placeholder_or_empty("ai_api_key", key) and len(key.strip()) >= 8:
+            _ai_status["status"] = "ok"
+            _ai_status["message"] = f"Готов к работе ({settings.primary_model})"
+
     return dict(_ai_status)
 
 

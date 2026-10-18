@@ -63,7 +63,7 @@ export function renderTopics(topics) {
   }).join("");
 }
 
-export function openTopicModal(topicId = null) {
+export async function openTopicModal(topicId = null) {
   const form = document.getElementById("topic-form");
   if (form) form.reset();
   const idEl = document.getElementById("topic-id");
@@ -74,7 +74,15 @@ export function openTopicModal(topicId = null) {
   if (activeEl) activeEl.checked = true;
 
   if (topicId !== null && topicId !== undefined) {
-    const t = allTopicsList.find(x => String(x.id) === String(topicId));
+    let t = allTopicsList.find(x => String(x.id) === String(topicId));
+    if (!t) {
+      try {
+        const fetched = await api.get(`/api/topics/${topicId}`);
+        if (fetched && !fetched.error) t = fetched;
+      } catch (e) {
+        console.warn("Could not fetch topic:", e);
+      }
+    }
     if (t) {
       if (idEl) idEl.value = t.id;
       if (titleEl) titleEl.textContent = `Редактирование: ${t.name}`;
@@ -95,12 +103,18 @@ export function openTopicModal(topicId = null) {
   }
 
   const modal = document.getElementById("topic-modal");
-  if (modal) modal.classList.add("active");
+  if (modal) {
+    modal.classList.add("active");
+    modal.classList.add("open");
+  }
 }
 
 export function closeTopicModal() {
   const modal = document.getElementById("topic-modal");
-  if (modal) modal.classList.remove("active");
+  if (modal) {
+    modal.classList.remove("active");
+    modal.classList.remove("open");
+  }
 }
 
 export async function handleTopicSubmit(e) {
@@ -131,30 +145,35 @@ export async function handleTopicSubmit(e) {
   }
 }
 
-export function deleteTopic(topicId) {
-  const t = allTopicsList.find(x => String(x.id) === String(topicId));
+export async function deleteTopic(topicId) {
+  let t = allTopicsList.find(x => String(x.id) === String(topicId));
+  if (!t) {
+    try {
+      const fetched = await api.get(`/api/topics/${topicId}`);
+      if (fetched && !fetched.error) t = fetched;
+    } catch (e) {}
+  }
   const topicName = t ? t.name : `топик #${topicId}`;
+
+  const doDelete = async () => {
+    try {
+      await api.delete(`/api/topics/${topicId}`);
+      showToast("Топик успешно удален", "info");
+      loadTopics();
+    } catch (err) {
+      showToast("Ошибка удаления: " + err.message, "error");
+    }
+  };
 
   if (typeof window.showConfirmDialog === 'function') {
     window.showConfirmDialog({
       title: "🗑️ Удаление топика",
       message: `Вы действительно хотите удалить тематический топик <b>«${escapeHtml(topicName)}»</b>? Поисковые запросы по этой теме будут остановлены.`,
       confirmText: "Да, удалить",
-      onConfirm: async () => {
-        try {
-          await api.delete(`/api/topics/${topicId}`);
-          showToast("Топик успешно удален", "info");
-          loadTopics();
-        } catch (err) {
-          showToast("Ошибка удаления: " + err.message, "error");
-        }
-      }
+      onConfirm: doDelete
     });
-  } else if (confirm("Удалить этот топик?")) {
-    api.delete(`/api/topics/${topicId}`).then(() => {
-      showToast("Топик удален", "info");
-      loadTopics();
-    }).catch(err => showToast("Ошибка: " + err.message, "error"));
+  } else if (confirm(`Вы действительно хотите удалить тематический топик «${topicName}»?`)) {
+    await doDelete();
   }
 }
 

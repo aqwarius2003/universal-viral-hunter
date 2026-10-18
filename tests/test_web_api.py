@@ -171,6 +171,15 @@ async def test_web_app_endpoints(tmp_path, monkeypatch):
         assert "gemini" in health["services"]
         assert "telegram" in health["services"]
 
+        # 12. Test GET /api/health alias
+        resp = await client.get("/api/health")
+        assert resp.status == 200
+        health_alias = await resp.json()
+        assert "services" in health_alias
+
+        # 13. Test POST /api/scout/trigger alias
+        resp = await client.post("/api/scout/trigger", json={})
+        assert resp.status in (200, 409)
     finally:
         await client.close()
 

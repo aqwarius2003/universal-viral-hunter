@@ -8,6 +8,7 @@ import { loadPublished } from './published.js';
 import { loadTopics } from './topics.js';
 import { loadSettings } from './settings.js';
 import { checkAuthAndInit, handleLogout } from './auth.js';
+import './modal.js';
 
 let currentTab = 'queue';
 let currentViewMode = localStorage.getItem('vh_view_mode') || 'grid';
@@ -51,11 +52,15 @@ export async function triggerPipeline() {
     btn.innerHTML = '⏳ Поиск твитов...';
   }
   try {
-    await api.post('/api/scout/trigger', {});
+    await api.post('/api/pipeline/run', {});
     showToast("Сбор твитов (Scout) запущен в фоне!", "success");
     setTimeout(loadQueue, 3000);
   } catch (err) {
-    showToast("Ошибка запуска Scout: " + err.message, "error");
+    if (err.message && err.message.includes("уже выполняется")) {
+      showToast("Scout уже выполняется в фоне", "info");
+    } else {
+      showToast("Ошибка запуска Scout: " + err.message, "error");
+    }
   } finally {
     if (btn) {
       btn.disabled = false;
@@ -77,8 +82,23 @@ async function updateStatuses() {
     if (aiPill && aiText && statusData) {
       const isOk = statusData.status === 'ok';
       const isBusy = statusData.status === 'busy' || statusData.status === 'waiting';
-      aiPill.className = `status-pill ${isOk ? 'status-pill-ok' : (isBusy ? 'status-pill-pending' : 'status-pill-error')}`;
-      aiText.innerText = isOk ? `ИИ: Готов` : (isBusy ? 'ИИ: Занят...' : 'ИИ: Ошибка');
+      const isPending = statusData.status === 'pending';
+
+      let pillClass = 'status-pill-error';
+      let textLabel = 'ИИ: Ошибка';
+      if (isOk) {
+        pillClass = 'status-pill-ok';
+        textLabel = 'ИИ: Готов';
+      } else if (isBusy) {
+        pillClass = 'status-pill-pending';
+        textLabel = 'ИИ: Занят...';
+      } else if (isPending) {
+        pillClass = 'status-pill-pending';
+        textLabel = 'ИИ: Готов';
+      }
+
+      aiPill.className = `status-pill ${pillClass}`;
+      aiText.innerText = textLabel;
       aiPill.title = statusData.message || (isOk ? `Модель: ${statusData.model}` : "Нажмите для подробностей");
     }
   } catch (e) {}

@@ -13,7 +13,8 @@
   animation: modalFadeIn 0.2s ease;
 }
 
-.modal-backdrop.active {
+.modal-backdrop.active,
+.modal-backdrop.open {
   display: flex;
 }
 

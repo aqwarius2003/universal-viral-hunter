@@ -248,11 +248,19 @@
             <p class="form-hint" style="margin-bottom: 12px;">Введите новый ключ и нажмите «Сохранить настройки». Если оставить маску (например, AIza...***), текущий ключ не изменится.</p>
             <div class="form-group">
               <label class="form-label" for="setting-gemini-key">Google Gemini API Key</label>
-              <input type="text" class="form-control" id="setting-gemini-key" name="ai_api_key" placeholder="Вставьте ваш AIzaSy..." autocomplete="off">
+              <div style="display:flex; gap:8px;">
+                <input type="text" class="form-control" id="setting-gemini-key" name="ai_api_key" placeholder="Вставьте ваш AIzaSy..." autocomplete="off">
+                <button type="button" class="btn btn-sm" id="btn-test-gemini" onclick="window.checkIntegration('gemini')" style="white-space:nowrap; padding: 6px 12px;">Проверить связь</button>
+              </div>
+              <div id="test-gemini-result" style="font-size:0.8rem; margin-top:6px; display:none;"></div>
             </div>
             <div class="form-group">
               <label class="form-label" for="setting-bot-token">Telegram Bot Token</label>
-              <input type="text" class="form-control" id="setting-bot-token" name="telegram_bot_token" placeholder="123456:ABC-DEF..." autocomplete="off">
+              <div style="display:flex; gap:8px;">
+                <input type="text" class="form-control" id="setting-bot-token" name="telegram_bot_token" placeholder="123456:ABC-DEF..." autocomplete="off">
+                <button type="button" class="btn btn-sm" id="btn-test-telegram" onclick="window.checkIntegration('telegram')" style="white-space:nowrap; padding: 6px 12px;">Проверить связь</button>
+              </div>
+              <div id="test-telegram-result" style="font-size:0.8rem; margin-top:6px; display:none;"></div>
             </div>
           </div>
 

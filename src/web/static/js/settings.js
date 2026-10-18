@@ -2,7 +2,7 @@
  * System Settings Module
  */
 import { api } from './api.js';
-import { showToast } from './toast.js';
+import { showToast, escapeHtml } from './toast.js';
 import { loadTopics } from './topics.js';
 
 export async function loadSettings() {
@@ -100,6 +100,51 @@ export async function saveSettings(e) {
   }
 }
 
+export async function checkIntegration(service) {
+  const btn = document.getElementById(`btn-test-${service}`);
+  const resEl = document.getElementById(`test-${service}-result`);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "⏳ Проверка...";
+  }
+  if (resEl) {
+    resEl.style.display = "block";
+    resEl.style.color = "var(--tg-text-muted)";
+    resEl.innerText = "Проверка подключения...";
+  }
+
+  try {
+    const data = await api.get(`/api/health?service=${service}`);
+    const svc = data.services ? data.services[service] : null;
+    if (svc && svc.status === 'ok') {
+      resEl.style.color = "#10b981";
+      resEl.innerHTML = `✅ <b>Успешно:</b> ${escapeHtml(svc.message || 'Связь установлена')}`;
+      showToast(`Проверка ${service}: успешно!`, "success");
+    } else if (svc && svc.status === 'warning') {
+      resEl.style.color = "#f59e0b";
+      resEl.innerHTML = `⚠️ <b>Внимание:</b> ${escapeHtml(svc.message || 'Требуется внимание')}`;
+      showToast(`Проверка ${service}: ${svc.message}`, "warning");
+    } else {
+      const msg = (svc && svc.message) || (data && data.message) || "Ошибка проверки";
+      resEl.style.color = "#ef4444";
+      resEl.innerHTML = `❌ <b>Ошибка:</b> ${escapeHtml(msg)}`;
+      showToast(`Ошибка ${service}: ${msg}`, "error");
+    }
+  } catch (err) {
+    if (resEl) {
+      resEl.style.color = "#ef4444";
+      resEl.innerHTML = `❌ <b>Ошибка:</b> ${escapeHtml(err.message)}`;
+    }
+    showToast(`Ошибка проверки: ${err.message}`, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "Проверить связь";
+    }
+  }
+}
+
 window.loadSettings = loadSettings;
 window.saveSettings = saveSettings;
 window.selectModel = selectModel;
+window.checkIntegration = checkIntegration;
