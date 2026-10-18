@@ -39,6 +39,23 @@ export async function loadSettings() {
     setVal("setting-channel", data.telegram_channel_id ?? "");
     setVal("setting-model", data.ai_model_name ?? "gemini-3.5-flash-lite, gemini-3.1-flash-lite");
 
+    // Quiet hours & Schedule settings
+    setCheck("setting-quiet-enabled", data.quiet_hours_enabled);
+    setVal("setting-quiet-start", data.quiet_hours_start || "22:00");
+    setVal("setting-quiet-end", data.quiet_hours_end || "07:00");
+    setVal("setting-interval", data.scheduler_interval_minutes ?? 120);
+    setVal("setting-daytime-interval", data.daytime_publish_interval_minutes ?? 60);
+
+    // Update banner in Topics tab if present
+    const bannerInterval = document.getElementById("banner-scout-interval");
+    if (bannerInterval) bannerInterval.innerText = `${data.scheduler_interval_minutes ?? 120} мин.`;
+    const bannerQuiet = document.getElementById("banner-quiet-hours");
+    if (bannerQuiet) {
+      bannerQuiet.innerText = data.quiet_hours_enabled
+        ? `${data.quiet_hours_start || "22:00"} — ${data.quiet_hours_end || "07:00"}`
+        : "Отключен";
+    }
+
     // Video Manager settings
     setVal("setting-video-ttl", data.video_ttl_days ?? 2);
     setVal("setting-video-quality", data.video_max_quality ?? 720);
@@ -92,9 +109,17 @@ export async function saveSettings(e) {
   const tzOff = document.getElementById("setting-timezone-offset")?.value;
   data.app_timezone = tzOff ? tzOff.trim() : (tzSel || "");
 
+  // Explicit quiet hours and schedule handling
+  data.quiet_hours_enabled = Boolean(document.getElementById("setting-quiet-enabled")?.checked);
+  data.quiet_hours_start = document.getElementById("setting-quiet-start")?.value?.trim() || "22:00";
+  data.quiet_hours_end = document.getElementById("setting-quiet-end")?.value?.trim() || "07:00";
+  data.daytime_publish_interval_minutes = parseInt(document.getElementById("setting-daytime-interval")?.value, 10) || 60;
+  data.scheduler_interval_minutes = parseInt(document.getElementById("setting-interval")?.value, 10) || 120;
+
   try {
     await api.post("/api/settings", data);
     showToast("Настройки успешно сохранены!", "success");
+    loadSettings();
   } catch (err) {
     showToast("Ошибка сохранения настроек: " + err.message, "error");
   }

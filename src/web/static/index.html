@@ -149,6 +149,14 @@
         </div>
         <button class="btn btn-primary btn-sm" onclick="window.openTopicModal()">+ Добавить топик</button>
       </div>
+      <!-- Schedule & Quiet Hours Status Banner -->
+      <div id="topics-schedule-banner" style="display:flex; justify-content:space-between; align-items:center; padding:10px 16px; background:rgba(59, 130, 246, 0.1); border:1px solid rgba(59, 130, 246, 0.25); border-radius:8px; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:20px; font-size:0.85rem; color:var(--tg-text); flex-wrap:wrap;">
+          <span>⏱️ <b>Интервал сбора Scout:</b> <span id="banner-scout-interval">120 мин.</span></span>
+          <span>🌙 <b>Режим сна:</b> <span id="banner-quiet-hours">22:00 — 07:00</span></span>
+        </div>
+        <button type="button" class="btn btn-sm" onclick="window.switchTab('settings')" style="font-size:0.75rem; padding:4px 10px;">⚙️ Настроить время сна</button>
+      </div>
       <div id="topics-list-container" style="display:flex; flex-direction:column; gap:12px;"></div>
     </section>
 
@@ -187,9 +195,52 @@
             </div>
           </div>
 
+          <!-- Scheduling & Quiet Hours (Sleep Mode) Block -->
+          <div style="padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid var(--tg-border); border-radius: var(--radius); margin-bottom: 16px;">
+            <h3 style="font-size: 1rem; color: #fff; margin-bottom: 8px;">⏰ Расписание публикаций и Режим сна (Тихие часы)</h3>
+            <p class="form-hint" style="margin-bottom: 14px;">Управление периодичностью сбора контента и окном сна (в тихие часы публикации не отправляются в канал, а собираются в очередь).</p>
+
+            <div class="form-row">
+              <div class="form-group" style="display:flex; flex-direction:column; justify-content:center;">
+                <label class="form-label" style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+                  <input type="checkbox" id="setting-quiet-enabled" name="quiet_hours_enabled" style="width:18px; height:18px;">
+                  <span style="font-weight: 600; color: #fff;">🌙 Режим сна (не публиковать ночью)</span>
+                </label>
+                <p class="form-hint">В тихие часы бот собирает посты в очередь модерации, но не отправляет их в Telegram-канал до утра</p>
+              </div>
+
+              <div class="form-group">
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                  <div>
+                    <label class="form-label" for="setting-quiet-start">Начало сна</label>
+                    <input type="time" class="form-control" id="setting-quiet-start" name="quiet_hours_start" value="22:00">
+                  </div>
+                  <div>
+                    <label class="form-label" for="setting-quiet-end">Окончание сна</label>
+                    <input type="time" class="form-control" id="setting-quiet-end" name="quiet_hours_end" value="07:00">
+                  </div>
+                </div>
+                <p class="form-hint">Диапазон времени сна (по умолчанию: 22:00 — 07:00)</p>
+              </div>
+            </div>
+
+            <div class="form-row" style="margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label" for="setting-interval">Интервал проверки Scout (минуты)</label>
+                <input type="number" min="5" step="5" class="form-control" id="setting-interval" name="scheduler_interval_minutes" value="120">
+                <p class="form-hint">Периодичность сбора постов планировщиком (120 = каждые 2 часа, 60 = каждый час)</p>
+              </div>
+              <div class="form-group">
+                <label class="form-label" for="setting-daytime-interval">Интервал дневных публикаций (минуты)</label>
+                <input type="number" min="5" step="5" class="form-control" id="setting-daytime-interval" name="daytime_publish_interval_minutes" value="60">
+                <p class="form-hint">Минимальный промежуток времени между автоматическими публикациями в канал</p>
+              </div>
+            </div>
+          </div>
+
           <!-- Main Core Settings Block -->
           <div style="padding: 16px; background: rgba(0,0,0,0.2); border: 1px solid var(--tg-border); border-radius: var(--radius); margin-bottom: 16px;">
-            <h3 style="font-size: 1rem; color: #fff; margin-bottom: 8px;">⚙️ Виральность и планировщик</h3>
+            <h3 style="font-size: 1rem; color: #fff; margin-bottom: 8px;">⚙️ Виральность и публикация</h3>
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label" for="setting-min-score">Мин. виральный скор (Min Viral Score)</label>
@@ -202,17 +253,15 @@
             </div>
             <div class="form-row">
               <div class="form-group">
-                <label class="form-label" for="setting-max-posts">Постов за запуск</label>
+                <label class="form-label" for="setting-max-posts">Лимит постов за запуск (Max Posts)</label>
                 <input type="number" min="1" max="10" class="form-control" id="setting-max-posts" name="max_posts_per_run" value="1">
+                <p class="form-hint">Сколько топ-постов публиковать за один цикл сбора</p>
               </div>
               <div class="form-group">
-                <label class="form-label" for="setting-interval">Интервал планировщика (мин)</label>
-                <input type="number" min="5" class="form-control" id="setting-interval" name="scheduler_interval_minutes" value="120">
+                <label class="form-label" for="setting-channel">Основной Telegram-канал (по умолчанию)</label>
+                <input type="text" class="form-control" id="setting-channel" name="telegram_channel_id" placeholder="@channel_name">
+                <p class="form-hint">Канал по умолчанию для постов, если в топике не указан свой канал</p>
               </div>
-            </div>
-            <div class="form-group">
-              <label class="form-label" for="setting-channel">Основной Telegram-канал</label>
-              <input type="text" class="form-control" id="setting-channel" name="telegram_channel_id" placeholder="@channel_name">
             </div>
           </div>
 

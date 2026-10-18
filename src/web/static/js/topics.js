@@ -10,8 +10,23 @@ export async function loadTopics() {
   const container = document.getElementById("topics-list-container");
   if (!container) return;
   try {
-    allTopicsList = await api.get("/api/topics");
+    const [topics, settings] = await Promise.all([
+      api.get("/api/topics"),
+      api.get("/api/settings").catch(() => null)
+    ]);
+    allTopicsList = topics || [];
     renderTopics(allTopicsList);
+
+    if (settings) {
+      const bannerInterval = document.getElementById("banner-scout-interval");
+      if (bannerInterval) bannerInterval.innerText = `${settings.scheduler_interval_minutes ?? 120} мин.`;
+      const bannerQuiet = document.getElementById("banner-quiet-hours");
+      if (bannerQuiet) {
+        bannerQuiet.innerText = settings.quiet_hours_enabled
+          ? `${settings.quiet_hours_start || "22:00"} — ${settings.quiet_hours_end || "07:00"}`
+          : "Отключен";
+      }
+    }
   } catch (err) {
     console.error("Failed to load topics:", err);
   }
