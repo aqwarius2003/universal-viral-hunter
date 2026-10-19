@@ -22,7 +22,8 @@ async def check_twitter_health() -> Dict[str, Any]:
     """
     cookies_path = Path("cookies.json")
     cookies_file_exists = cookies_path.is_file()
-    cookies_dict = load_cookies_from_file(cookies_path) if cookies_file_exists else {}
+    _load_cookies = _resolve_dep("load_cookies_from_file", load_cookies_from_file)
+    cookies_dict = _load_cookies(cookies_path) if cookies_file_exists else {}
 
     has_env_token = bool(
         settings.twitter_auth_token
