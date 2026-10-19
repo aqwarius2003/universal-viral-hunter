@@ -226,6 +226,27 @@ async def init_db() -> None:
         await db.execute("CREATE INDEX IF NOT EXISTS idx_digest_items_digest ON digest_items(digest_id);")
         await db.execute("CREATE INDEX IF NOT EXISTS idx_digest_items_tweet ON digest_items(tweet_id);")
 
+        # 2b. Permanent deduplication memory table (never purged by maintenance/TTL)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS published_video_fingerprints (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tweet_id TEXT NOT NULL UNIQUE,
+                video_hash TEXT,
+                video_url TEXT,
+                status TEXT NOT NULL,
+                recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_pvf_tweet_id ON published_video_fingerprints(tweet_id);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_pvf_video_hash ON published_video_fingerprints(video_hash);")
+        await db.execute("CREATE INDEX IF NOT EXISTS idx_pvf_video_url ON published_video_fingerprints(video_url);")
+
+        # Backfill existing POSTED and IGNORED tweets into permanent memory
+        await db.execute("""
+            INSERT OR IGNORE INTO published_video_fingerprints (tweet_id, video_hash, status)
+            SELECT tweet_id, video_hash, status FROM tweets WHERE status IN ('POSTED', 'IGNORED')
+        """)
+
         # 3. Seed Zero-State / Default presets if not already present
         now_iso = datetime.now(timezone.utc).isoformat()
         default_presets = {
@@ -425,12 +446,17 @@ async def find_duplicate_video_in_db(
 
         # 1. Exact video URL match if available
         if video_url:
-            query_url = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_data LIKE ?"
-            params_url: List[Any] = [f"%{video_url}%"]
+            query_url = """
+                SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_data LIKE ?
+                UNION
+                SELECT tweet_id, '' as tweet_url, status, '' as author_handle, video_hash FROM published_video_fingerprints WHERE video_url LIKE ?
+            """
+            params_url: List[Any] = [f"%{video_url}%", f"%{video_url}%"]
             if exclude_tweet_id:
-                query_url += " AND tweet_id != ?"
+                query_url = f"SELECT * FROM ({query_url}) WHERE tweet_id != ? LIMIT 1"
                 params_url.append(exclude_tweet_id)
-            query_url += " LIMIT 1"
+            else:
+                query_url = f"SELECT * FROM ({query_url}) LIMIT 1"
 
             async with db.execute(query_url, params_url) as cursor:
                 url_row = await cursor.fetchone()
@@ -441,12 +467,17 @@ async def find_duplicate_video_in_db(
             return None
 
         # 2. Exact match fast path (indexed)
-        query_exact = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash = ?"
-        params: List[Any] = [video_hash]
+        query_exact = """
+            SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash = ?
+            UNION
+            SELECT tweet_id, '' as tweet_url, status, '' as author_handle, video_hash FROM published_video_fingerprints WHERE video_hash = ?
+        """
+        params: List[Any] = [video_hash, video_hash]
         if exclude_tweet_id:
-            query_exact += " AND tweet_id != ?"
+            query_exact = f"SELECT * FROM ({query_exact}) WHERE tweet_id != ? LIMIT 1"
             params.append(exclude_tweet_id)
-        query_exact += " LIMIT 1"
+        else:
+            query_exact = f"SELECT * FROM ({query_exact}) LIMIT 1"
 
         async with db.execute(query_exact, params) as cursor:
             exact_row = await cursor.fetchone()
@@ -454,10 +485,14 @@ async def find_duplicate_video_in_db(
                 return dict(exact_row)
 
         # 3. Perceptual match scan across all stored video fingerprints
-        query_all = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash IS NOT NULL"
+        query_all = """
+            SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash IS NOT NULL
+            UNION
+            SELECT tweet_id, '' as tweet_url, status, '' as author_handle, video_hash FROM published_video_fingerprints WHERE video_hash IS NOT NULL
+        """
         params_all: List[Any] = []
         if exclude_tweet_id:
-            query_all += " AND tweet_id != ?"
+            query_all = f"SELECT * FROM ({query_all}) WHERE tweet_id != ?"
             params_all.append(exclude_tweet_id)
 
         async with db.execute(query_all, params_all) as cursor:
@@ -474,6 +509,7 @@ async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]
     """
     Filters out tweets that already exist in the database by ID or contain duplicate video
     matching any existing tweet (even across different authors / tweet IDs).
+    Checks both active tweets and permanent published_video_fingerprints history.
     """
     if not tweets:
         return []
@@ -488,9 +524,10 @@ async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]
         for tweet in tweets:
             tweet_id = tweet.get("tweet_id")
 
-            # 1. Check tweet ID uniqueness in DB
+            # 1. Check tweet ID uniqueness in DB and permanent published memory
             async with db.execute(
-                "SELECT 1 FROM tweets WHERE tweet_id = ?", (tweet_id,)
+                "SELECT 1 FROM tweets WHERE tweet_id = ? UNION SELECT 1 FROM published_video_fingerprints WHERE tweet_id = ?",
+                (tweet_id, tweet_id)
             ) as cursor:
                 exists = await cursor.fetchone()
                 if exists:
@@ -613,6 +650,16 @@ async def update_tweet_status_and_score(
                 """,
                 (score, is_viral, status, impact_score, tweet_id)
             )
+
+        if status in ("POSTED", "IGNORED"):
+            await db.execute("""
+                INSERT INTO published_video_fingerprints (tweet_id, video_hash, status)
+                SELECT tweet_id, video_hash, ? FROM tweets WHERE tweet_id = ?
+                ON CONFLICT(tweet_id) DO UPDATE SET 
+                    status = excluded.status, 
+                    video_hash = COALESCE(excluded.video_hash, published_video_fingerprints.video_hash)
+            """, (status, tweet_id))
+
         await db.commit()
 
 async def update_tweet_metrics(
@@ -969,6 +1016,11 @@ async def cancel_scheduled_post(tweet_id: str) -> None:
             "UPDATE tweets SET status = 'IGNORED' WHERE tweet_id = ?",
             (tweet_id,)
         )
+        await db.execute("""
+            INSERT INTO published_video_fingerprints (tweet_id, video_hash, status)
+            SELECT tweet_id, video_hash, 'IGNORED' FROM tweets WHERE tweet_id = ?
+            ON CONFLICT(tweet_id) DO UPDATE SET status = 'IGNORED'
+        """, (tweet_id,))
         await db.commit()
 
 
@@ -983,6 +1035,11 @@ async def mark_post_published(tweet_id: str) -> None:
             """,
             (tweet_id,)
         )
+        await db.execute("""
+            INSERT INTO published_video_fingerprints (tweet_id, video_hash, status)
+            SELECT tweet_id, video_hash, 'POSTED' FROM tweets WHERE tweet_id = ?
+            ON CONFLICT(tweet_id) DO UPDATE SET status = 'POSTED'
+        """, (tweet_id,))
         await db.commit()
 
 
@@ -1446,9 +1503,9 @@ async def export_tweets_data_stream(start_date: str, end_date: str):
                 yield _deserialize_row(dict(row))
 
 async def delete_historical_data(end_date: str) -> int:
-    """Deletes all tweets created before end_date."""
+    """Deletes old unposted tweets created before end_date, preserving POSTED and IGNORED deduplication memory."""
     async with aiosqlite.connect(settings.db_path) as db:
-        cur = await db.execute("DELETE FROM tweets WHERE created_at <= ?", (end_date,))
+        cur = await db.execute("DELETE FROM tweets WHERE created_at <= ? AND status NOT IN ('POSTED', 'IGNORED')", (end_date,))
         await db.commit()
         # Also clean up pipeline runs, daily digests, etc if they take up space
         await db.execute("DELETE FROM pipeline_runs WHERE started_at <= ?", (end_date,))
@@ -1457,13 +1514,16 @@ async def delete_historical_data(end_date: str) -> int:
         return cur.rowcount
 
 async def cleanup_expired_posts(ttl_days: int) -> int:
-    """Deletes old POSTED, IGNORED, FAILED, and old RAW posts older than ttl_days to free disk space."""
+    """
+    Cleans up stale unposted RAW or FAILED tweets older than ttl_days (based on inserted_at).
+    CRITICAL: Never deletes POSTED or IGNORED tweets, as they serve as the permanent
+    deduplication memory (by tweet_id and video_hash) to prevent duplicate publications.
+    """
     threshold = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).isoformat()
     async with aiosqlite.connect(settings.db_path) as db:
-        # We can delete all tweets that are older than the threshold, regardless of status,
-        # but to be safe, maybe only delete those that are already POSTED or IGNORED or RAW.
+        # Strictly delete ONLY stale RAW or FAILED tweets by inserted_at, NEVER POSTED or IGNORED
         cur = await db.execute(
-            "DELETE FROM tweets WHERE created_at <= ? AND status IN ('POSTED', 'IGNORED', 'FAILED', 'RAW')",
+            "DELETE FROM tweets WHERE inserted_at <= ? AND status IN ('RAW', 'FAILED')",
             (threshold,)
         )
         await db.commit()

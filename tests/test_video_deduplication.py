@@ -272,3 +272,71 @@ async def test_prepublish_dedup_against_ignored_and_posted_posts(tmp_path):
     assert dup_found["tweet_id"] == "tweet_deleted_01"
     assert dup_found["status"] == "IGNORED"
 
+
+@pytest.mark.asyncio
+async def test_cleanup_preserves_old_posted_tweets_and_prevents_duplicate_repost(tmp_path):
+    """
+    REGRESSION TEST: Ensures an old viral tweet from 2023 with created_at <= 30 days
+    is NEVER deleted by cleanup_expired_posts, and its video_hash is permanently
+    preserved in both tweets table and published_video_fingerprints table so that
+    Scout cannot re-post it 1 hour later.
+    """
+    from src.db import cleanup_expired_posts
+
+    test_db = tmp_path / "test_old_posted_cleanup.sqlite"
+    settings.db_path = str(test_db)
+    await init_db()
+
+    tesla_crash_hash = "bd8f0f094cff1733:be8f190c13b13155:be87690d36323175"
+    tweet_2023 = {
+        "tweet_id": "1639460487166586881",
+        "author_handle": "@Anoop_Khatra",
+        "text_raw": "Witnessed and recorded the most INSANE car crash yesterday",
+        "tweet_url": "https://x.com/Anoop_Khatra/status/1639460487166586881",
+        "created_at": "2023-03-25T02:53:34+00:00",  # Created in 2023!
+        "video_hash": tesla_crash_hash
+    }
+
+    # Step 1: Ingest and mark as POSTED
+    filtered = await filter_new_tweets([tweet_2023])
+    assert len(filtered) == 1
+    await save_raw_tweets(filtered)
+    await update_tweet_status_and_score(
+        tweet_id="1639460487166586881",
+        score=99.0,
+        is_viral=True,
+        status="POSTED"
+    )
+
+    # Step 2: Simulate hourly maintenance TTL cleanup (30 days)
+    deleted_count = await cleanup_expired_posts(ttl_days=30)
+    # MUST NOT delete the POSTED tweet despite its 2023 created_at!
+    assert deleted_count == 0
+
+    # Step 3: Verify tweet is still in tweets table
+    async with aiosqlite.connect(settings.db_path) as db:
+        async with db.execute("SELECT status, video_hash FROM tweets WHERE tweet_id = ?", ("1639460487166586881",)) as cursor:
+            row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] == "POSTED"
+            assert row[1] == tesla_crash_hash
+
+        # Verify tweet is also recorded in published_video_fingerprints
+        async with db.execute("SELECT status, video_hash FROM published_video_fingerprints WHERE tweet_id = ?", ("1639460487166586881",)) as cursor:
+            fp_row = await cursor.fetchone()
+            assert fp_row is not None
+            assert fp_row[0] == "POSTED"
+            assert fp_row[1] == tesla_crash_hash
+
+    # Step 4: Scout runs again and tries to filter the same tweet
+    re_scouted = await filter_new_tweets([tweet_2023])
+    # MUST BE REJECTED!
+    assert len(re_scouted) == 0
+
+    # Step 5: Duplicate check must also find it
+    dup = await find_duplicate_video_in_db(tesla_crash_hash, exclude_tweet_id="new_incoming_tweet")
+    assert dup is not None
+    assert dup["tweet_id"] == "1639460487166586881"
+    assert dup["status"] == "POSTED"
+
+
