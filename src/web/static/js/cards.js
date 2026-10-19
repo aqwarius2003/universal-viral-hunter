@@ -159,7 +159,7 @@ export function renderPostCard(p, idx, total, isArchive = false) {
       </div>
 
       <div style="display:flex; gap:6px;">
-        <button class="btn btn-sm btn-danger" onclick="window.deletePost('${p.tweet_id}')" title="Отменить">
+        <button class="btn btn-sm btn-danger" onclick="window.deletePost('${p.tweet_id}', event)" title="Отменить (Shift+клик для быстрого удаления)">
           ✕
         </button>
         <button class="btn btn-sm btn-success" onclick="window.publishNow('${p.tweet_id}')">

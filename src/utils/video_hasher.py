@@ -224,14 +224,44 @@ def hamming_distance(hash1: str, hash2: str) -> int:
         return 64
 
 
-def is_fingerprint_duplicate(fp1: str, fp2: str, max_distance: int = 4) -> bool:
+def is_degenerate_frame_hash(h: str) -> bool:
+    """
+    Checks if a frame hash is degenerate (e.g. solid black, pure white, or flat uniform color).
+    Such frames (like fade-in from black) have trivial bit patterns and must not be used on their own
+    as proof of duplicate videos.
+    """
+    if not h or len(h) < 16:
+        return True
+    try:
+        val = int(h, 16)
+        set_bits = bin(val).count("1")
+        if set_bits <= 3 or set_bits >= 61:
+            return True
+        if h.lower() in ("0000000000000000", "ffffffffffffffff", "aaaaaaaaaaaaaaaa", "5555555555555555"):
+            return True
+        return False
+    except Exception:
+        return True
+
+
+def is_fingerprint_duplicate(fp1: str, fp2: str, max_distance: int = 5) -> bool:
     """
     Determines if two video fingerprints represent the same video.
-    For 3-frame fingerprints: matches if at least 2 corresponding frames have distance <= max_distance.
-    For single-frame/thumbnail fingerprints: matches if minimum cross-distance <= max_distance.
+    Features:
+    1. Exact match fast-path.
+    2. First-frame comparison: If Frame 1 (or thumbnail) matches with distance <= max_distance (default 5),
+       the videos share the exact opening scene.
+    3. Cross-frame comparison: If ANY non-degenerate frame of Video 1 matches ANY frame of Video 2
+       with distance <= max_distance, it detects trimmed re-uploads (intro/outro cuts).
+    4. Multi-frame drift tolerance: If at least 2 corresponding frames have distance <= max_distance + 3 (<= 8),
+       or the average distance across aligned frames <= 7.0, it matches even with re-compression artifacts.
+    5. Single-frame / thumbnail comparison: matches if minimum distance to any frame is <= max_distance + 1 (<= 6).
     """
     if not fp1 or not fp2:
         return False
+
+    if fp1 == fp2:
+        return True
 
     parts1 = [p.strip() for p in fp1.split(":") if p.strip()]
     parts2 = [p.strip() for p in fp2.split(":") if p.strip()]
@@ -239,25 +269,57 @@ def is_fingerprint_duplicate(fp1: str, fp2: str, max_distance: int = 4) -> bool:
     if not parts1 or not parts2:
         return False
 
-    # Multi-frame comparison (both have 3 frames)
-    if len(parts1) >= 3 and len(parts2) >= 3:
-        matches = 0
-        for h1, h2 in zip(parts1[:3], parts2[:3]):
-            if hamming_distance(h1, h2) <= max_distance:
-                matches += 1
-        if matches >= 2:
+    # Filter out degenerate frame hashes for safety against solid black/white frames
+    valid1 = [(idx, h) for idx, h in enumerate(parts1) if not is_degenerate_frame_hash(h)]
+    valid2 = [(idx, h) for idx, h in enumerate(parts2) if not is_degenerate_frame_hash(h)]
+
+    if not valid1 or not valid2:
+        return False
+
+    # 1. First non-degenerate frame matching:
+    # If the first valid frame of both videos matches (distance <= max_distance), it's the same video
+    if valid1[0][0] == 0 and valid2[0][0] == 0:
+        first_dist = hamming_distance(valid1[0][1], valid2[0][1])
+        if first_dist <= max_distance:
             return True
 
-    # Cross-frame check: If any 2 frames match across or single-frame match
-    cross_matches = 0
-    for h1 in parts1:
-        for h2 in parts2:
-            if hamming_distance(h1, h2) <= max_distance:
-                cross_matches += 1
+    # 2. Cross-frame minimum distance check:
+    # Catches clips trimmed at start or end by matching any keyframe
+    min_cross_dist = 64
+    cross_matches_count = 0
+    for _, h1 in valid1:
+        for _, h2 in valid2:
+            d = hamming_distance(h1, h2)
+            if d < min_cross_dist:
+                min_cross_dist = d
+            if d <= max_distance:
+                cross_matches_count += 1
                 break
 
-    # If single-frame hash was used on either side
-    if min(len(parts1), len(parts2)) == 1:
-        return cross_matches >= 1
+    # If any frame is practically identical (<= max_distance), it's a duplicate
+    if min_cross_dist <= max_distance:
+        return True
 
-    return cross_matches >= 2
+    # 3. If either side is a single frame / thumbnail, allow tolerance up to max_distance + 1 (e.g. 6)
+    if min(len(valid1), len(valid2)) == 1:
+        return min_cross_dist <= (max_distance + 1)
+
+    # 4. Multi-frame comparison (corresponding frames with drift tolerance)
+    aligned_distances = []
+    for h1, h2 in zip(parts1, parts2):
+        if not is_degenerate_frame_hash(h1) and not is_degenerate_frame_hash(h2):
+            aligned_distances.append(hamming_distance(h1, h2))
+
+    if aligned_distances:
+        # If at least 2 corresponding frames have distance <= max_distance + 3 (e.g. <= 8)
+        close_frames = sum(1 for d in aligned_distances if d <= (max_distance + 3))
+        if close_frames >= 2:
+            return True
+
+        # Or if average distance across aligned frames <= 7.0
+        avg_dist = sum(aligned_distances) / len(aligned_distances)
+        if avg_dist <= 7.0 and min_cross_dist <= 7:
+            return True
+
+    return cross_matches_count >= 2
+

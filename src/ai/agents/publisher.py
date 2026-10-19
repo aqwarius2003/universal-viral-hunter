@@ -236,6 +236,38 @@ async def publisher_node(state: AgentState) -> Dict[str, Any]:
         media_urls = tweet_data.get("media_urls", [])
         video_data = tweet_data.get("video_data")
 
+        # Pre-publish video deduplication check
+        v_hash = tweet_data.get("video_hash")
+        orig_v_url = None
+        if isinstance(video_data, dict):
+            if not v_hash:
+                v_hash = video_data.get("fingerprint")
+            orig_v_url = video_data.get("original_url")
+
+        if v_hash or orig_v_url:
+            from src.db import find_duplicate_video_in_db
+            from src.utils.video_manager import delete_cached_video
+            dup = await find_duplicate_video_in_db(
+                video_hash=v_hash,
+                video_url=orig_v_url,
+                exclude_tweet_id=draft["tweet_id"]
+            )
+            if dup and dup.get("status") in ("POSTED", "IGNORED"):
+                print(
+                    f"🚫 [Publisher] Отсеян дубликат видео перед публикацией: твит {draft['tweet_id']} "
+                    f"дублирует ранее {dup.get('status')} твит {dup['tweet_id']}. Статус изменен на IGNORED."
+                )
+                await update_tweet_status_and_score(
+                    tweet_id=draft["tweet_id"],
+                    score=tweet_data.get("viral_score", 0.0),
+                    is_viral=False,
+                    status="IGNORED",
+                    impact_score=ai_data.get("impact_score", 0),
+                    summary_json=json.dumps(ai_data, ensure_ascii=False),
+                )
+                delete_cached_video(draft["tweet_id"])
+                continue
+
         # Topic routing
         topic_id = tweet_data.get("topic_id")
         topic = topics_map.get(topic_id, {})
@@ -362,8 +394,56 @@ async def publish_single_top_post(is_test: bool = False) -> Optional[Dict[str, A
     if not eligible:
         return None
 
-    due_scheduled = [p for p in eligible if p.get("scheduled_at")]
-    top_draft = due_scheduled[0] if due_scheduled else eligible[0]
+    from src.db import find_duplicate_video_in_db
+    from src.utils.video_manager import delete_cached_video
+
+    top_draft = None
+    while eligible:
+        due_scheduled = [p for p in eligible if p.get("scheduled_at")]
+        candidate = due_scheduled[0] if due_scheduled else eligible[0]
+
+        # Pre-publish video deduplication check
+        v_hash = candidate.get("video_hash")
+        v_data = candidate.get("video_data")
+        orig_v_url = None
+        if isinstance(v_data, str):
+            try:
+                v_data = json.loads(v_data)
+            except Exception:
+                v_data = None
+        if isinstance(v_data, dict):
+            if not v_hash:
+                v_hash = v_data.get("fingerprint")
+            orig_v_url = v_data.get("original_url")
+
+        if v_hash or orig_v_url:
+            dup = await find_duplicate_video_in_db(
+                video_hash=v_hash,
+                video_url=orig_v_url,
+                exclude_tweet_id=candidate["tweet_id"]
+            )
+            if dup and dup.get("status") in ("POSTED", "IGNORED"):
+                print(
+                    f"🚫 [Publisher] Отсеян дубликат видео из очереди: твит {candidate['tweet_id']} "
+                    f"дублирует ранее {dup.get('status')} твит {dup['tweet_id']}. Статус изменен на IGNORED."
+                )
+                await update_tweet_status_and_score(
+                    tweet_id=candidate["tweet_id"],
+                    score=candidate.get("viral_score", 0.0),
+                    is_viral=False,
+                    status="IGNORED",
+                    impact_score=candidate.get("impact_score", 0) or 0,
+                )
+                delete_cached_video(candidate["tweet_id"])
+                eligible = [p for p in eligible if p["tweet_id"] != candidate["tweet_id"]]
+                continue
+
+        top_draft = candidate
+        break
+
+    if not top_draft:
+        return None
+
     tweet_url = top_draft["tweet_url"]
     media_urls = top_draft.get("media_urls", [])
 

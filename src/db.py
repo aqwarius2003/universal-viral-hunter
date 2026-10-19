@@ -405,15 +405,17 @@ async def delete_topic(topic_id: int) -> None:
         await db.commit()
 
 async def find_duplicate_video_in_db(
-    video_hash: str,
-    max_distance: int = 4,
+    video_hash: Optional[str] = None,
+    video_url: Optional[str] = None,
+    max_distance: int = 5,
     exclude_tweet_id: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Searches SQLite for any existing tweet with a matching or perceptually identical video hash.
-    Checks exact match first via indexed lookup, then evaluates Hamming distance across stored fingerprints.
+    Searches SQLite for any existing tweet with a matching or perceptually identical video hash
+    or matching original video URL.
+    Checks video URL match first, then exact hash match, then evaluates perceptual Hamming distance.
     """
-    if not video_hash:
+    if not video_hash and not video_url:
         return None
 
     from src.utils.video_hasher import is_fingerprint_duplicate
@@ -421,7 +423,24 @@ async def find_duplicate_video_in_db(
     async with aiosqlite.connect(settings.db_path) as db:
         db.row_factory = aiosqlite.Row
 
-        # 1. Exact match fast path (indexed)
+        # 1. Exact video URL match if available
+        if video_url:
+            query_url = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_data LIKE ?"
+            params_url: List[Any] = [f"%{video_url}%"]
+            if exclude_tweet_id:
+                query_url += " AND tweet_id != ?"
+                params_url.append(exclude_tweet_id)
+            query_url += " LIMIT 1"
+
+            async with db.execute(query_url, params_url) as cursor:
+                url_row = await cursor.fetchone()
+                if url_row:
+                    return dict(url_row)
+
+        if not video_hash:
+            return None
+
+        # 2. Exact match fast path (indexed)
         query_exact = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash = ?"
         params: List[Any] = [video_hash]
         if exclude_tweet_id:
@@ -434,7 +453,7 @@ async def find_duplicate_video_in_db(
             if exact_row:
                 return dict(exact_row)
 
-        # 2. Perceptual match scan across all stored video fingerprints
+        # 3. Perceptual match scan across all stored video fingerprints
         query_all = "SELECT tweet_id, tweet_url, status, author_handle, video_hash FROM tweets WHERE video_hash IS NOT NULL"
         params_all: List[Any] = []
         if exclude_tweet_id:
@@ -461,6 +480,7 @@ async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
     new_tweets: List[Dict[str, Any]] = []
     seen_batch_hashes: List[Tuple[str, str]] = []  # (video_hash, tweet_id)
+    seen_batch_urls: List[Tuple[str, str]] = []  # (video_url, tweet_id)
     from src.utils.video_manager import delete_cached_video
     from src.utils.video_hasher import is_fingerprint_duplicate
 
@@ -478,10 +498,17 @@ async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]
 
             # 2. Check video fingerprint deduplication
             v_hash = tweet.get("video_hash")
+            v_data = tweet.get("video_data") or {}
+            orig_v_url = v_data.get("original_url") if isinstance(v_data, dict) else None
+
             is_video_dup = False
-            if v_hash:
+            if v_hash or orig_v_url:
                 # Check against existing tweets in DB
-                db_dup = await find_duplicate_video_in_db(v_hash, exclude_tweet_id=tweet_id)
+                db_dup = await find_duplicate_video_in_db(
+                    video_hash=v_hash,
+                    video_url=orig_v_url,
+                    exclude_tweet_id=tweet_id
+                )
                 if db_dup:
                     print(
                         f"🚫 [Scout] Дубликат видео отсеян: твит {tweet_id} ({tweet.get('author_handle')}) "
@@ -493,20 +520,35 @@ async def filter_new_tweets(tweets: List[Dict[str, Any]]) -> List[Dict[str, Any]
                     is_video_dup = True
                 else:
                     # Check against other tweets in the same incoming batch
-                    for prev_hash, prev_id in seen_batch_hashes:
-                        if is_fingerprint_duplicate(v_hash, prev_hash):
-                            print(
-                                f"🚫 [Scout] Дубликат видео в текущей пачке: твит {tweet_id} "
-                                f"дублирует {prev_id}. Пропускаем."
-                            )
-                            if tweet_id:
-                                delete_cached_video(tweet_id)
-                            is_video_dup = True
-                            break
+                    if orig_v_url:
+                        for prev_url, prev_id in seen_batch_urls:
+                            if orig_v_url == prev_url:
+                                print(
+                                    f"🚫 [Scout] Дубликат URL видео в текущей пачке: твит {tweet_id} "
+                                    f"дублирует {prev_id}. Пропускаем."
+                                )
+                                if tweet_id:
+                                    delete_cached_video(tweet_id)
+                                is_video_dup = True
+                                break
+
+                    if not is_video_dup and v_hash:
+                        for prev_hash, prev_id in seen_batch_hashes:
+                            if is_fingerprint_duplicate(v_hash, prev_hash):
+                                print(
+                                    f"🚫 [Scout] Дубликат видео в текущей пачке: твит {tweet_id} "
+                                    f"дублирует {prev_id}. Пропускаем."
+                                )
+                                if tweet_id:
+                                    delete_cached_video(tweet_id)
+                                is_video_dup = True
+                                break
 
             if not is_video_dup:
                 if v_hash and tweet_id:
                     seen_batch_hashes.append((v_hash, tweet_id))
+                if orig_v_url and tweet_id:
+                    seen_batch_urls.append((orig_v_url, tweet_id))
                 new_tweets.append(tweet)
 
     return new_tweets

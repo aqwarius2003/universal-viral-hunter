@@ -400,6 +400,40 @@ async def handle_publish_now(request: web.Request) -> web.Response:
             except Exception as dl_err:
                 print(f"⚠️ Ошибка загрузки видео перед публикацией {tweet_id}: {dl_err}")
 
+    # Pre-publish duplicate video check
+    v_hash = tweet.get("video_hash")
+    orig_v_url = None
+    if isinstance(video_data, dict):
+        if not v_hash:
+            v_hash = video_data.get("fingerprint")
+        orig_v_url = video_data.get("original_url")
+
+    if v_hash or orig_v_url:
+        from src.db import find_duplicate_video_in_db, update_tweet_status_and_score
+        from src.utils.video_manager import delete_cached_video
+        dup = await find_duplicate_video_in_db(
+            video_hash=v_hash,
+            video_url=orig_v_url,
+            exclude_tweet_id=tweet_id
+        )
+        if dup and dup.get("status") in ("POSTED", "IGNORED"):
+            status_text = "опубликовано ранее" if dup.get("status") == "POSTED" else "отклонено/удалено"
+            await update_tweet_status_and_score(
+                tweet_id=tweet_id,
+                score=tweet.get("viral_score", 0.0),
+                is_viral=False,
+                status="IGNORED",
+                impact_score=summary_data.get("impact_score", 0),
+            )
+            delete_cached_video(tweet_id)
+            try:
+                await delete_admin_moderation_message(tweet_id, action="deleted")
+            except Exception:
+                pass
+            return web.json_response({
+                "error": f"Видео из этого поста уже было {status_text} (твит {dup['tweet_id']}). Пост отменен как дубликат."
+            }, status=400)
+
     media_urls = tweet.get("media_urls", [])
     selected_idx = summary_data.get("selected_image_index")
     photo_url = None

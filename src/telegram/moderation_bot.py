@@ -317,6 +317,35 @@ async def _publish_approved_post(tweet_id: str, custom_comment: str = None, bot:
         except Exception:
             video_data = None
 
+    # Guard against duplicate video of already POSTED or IGNORED tweet
+    v_hash = tweet.get("video_hash")
+    orig_v_url = None
+    if isinstance(video_data, dict):
+        if not v_hash:
+            v_hash = video_data.get("fingerprint")
+        orig_v_url = video_data.get("original_url")
+
+    if v_hash or orig_v_url:
+        from src.db import find_duplicate_video_in_db
+        from src.utils.video_manager import delete_cached_video
+        dup = await find_duplicate_video_in_db(
+            video_hash=v_hash,
+            video_url=orig_v_url,
+            exclude_tweet_id=tweet_id
+        )
+        if dup and dup.get("status") in ("POSTED", "IGNORED"):
+            status_text = "опубликовано ранее" if dup.get("status") == "POSTED" else "отклонено/удалено"
+            await update_tweet_status_and_score(
+                tweet_id=tweet_id,
+                score=tweet.get("viral_score", 0.0),
+                is_viral=False,
+                status="IGNORED",
+                impact_score=ai_data.get("impact_score", 0) if isinstance(ai_data, dict) else 0,
+            )
+            delete_cached_video(tweet_id)
+            await delete_admin_moderation_message(tweet_id, action="deleted")
+            return f"⚠️ Видео из этого поста уже было {status_text} в твите {dup['tweet_id']}. Пост отклонен как дубликат."
+
     if custom_comment:
         original_text = ai_data.get("summary_ru", "")
         ai_data["summary_ru"] = f"🗣 <b>Комментарий:</b>\n{custom_comment}\n\n{original_text}"

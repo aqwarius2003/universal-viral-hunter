@@ -205,7 +205,16 @@ export function showConfirmDialog({ title, message, confirmText = 'Удалит�
     };
   }
 
-  if (modal) modal.classList.add("active");
+  if (modal) {
+    if (!modal._hasBackdropClick) {
+      modal.addEventListener("click", (e) => {
+        if (e.target === modal) closeConfirmModal();
+      });
+      modal._hasBackdropClick = true;
+    }
+    modal.classList.add("active");
+    if (btnConfirm) btnConfirm.focus();
+  }
 }
 
 export function closeConfirmModal() {

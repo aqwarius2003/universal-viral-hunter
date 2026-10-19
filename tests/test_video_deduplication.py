@@ -190,3 +190,85 @@ async def test_batch_duplicate_videos(tmp_path):
     # Only the first one in the batch should pass
     assert len(res) == 1
     assert res[0]["tweet_id"] == "batch_t1"
+
+
+@pytest.mark.asyncio
+async def test_production_california_plane_crash_duplicate():
+    """
+    Validates that the California plane crash hashes from production
+    (Tweet 2112077202644934978 vs Tweet 2112070371814019417)
+    are strictly identified as duplicates.
+    """
+    hash_a = "ffe7e52143c9cec2:f4949e2ad06847c7:db7fada0f0ff785e"
+    hash_b = "ffe7e52143c9cec2:f4949a2ad0c065d7:dbffafa0f0ff282f"
+
+    assert is_fingerprint_duplicate(hash_a, hash_b) is True
+    assert is_fingerprint_duplicate(hash_b, hash_a) is True
+
+
+@pytest.mark.asyncio
+async def test_first_frame_and_cross_frame_matching():
+    # 1. Matching Frame 1 (user's explicit question: "А по первому кадру ? Кадр же будет аналогичный?")
+    f1 = "a1b2c3d4e5f60718"
+    fA2 = "1234567890abcdef"
+    fA3 = "fedcba0987654321"
+    fB2 = "1111222233334444"
+    fB3 = "5555666677778888"
+
+    fp_start_match_1 = f"{f1}:{fA2}:{fA3}"
+    fp_start_match_2 = f"{f1}:{fB2}:{fB3}"
+    assert is_fingerprint_duplicate(fp_start_match_1, fp_start_match_2) is True
+
+    # 2. Trimmed video: Frame 1 of Video A matches Frame 2 of Video B
+    fp_trimmed_1 = f"{fA2}:{fA3}:{fB2}"
+    fp_trimmed_2 = f"{fB3}:{fA2}:{f1}"
+    assert is_fingerprint_duplicate(fp_trimmed_1, fp_trimmed_2) is True
+
+    # 3. Single-frame thumbnail matching multi-frame
+    assert is_fingerprint_duplicate(f1, fp_start_match_1) is True
+
+
+@pytest.mark.asyncio
+async def test_degenerate_black_frames_safety():
+    """
+    Ensures two different videos starting with a black fade-in (0000000000000000)
+    are NOT falsely marked as duplicates.
+    """
+    black_frame = "0000000000000000"
+    v1 = f"{black_frame}:1234567890abcdef:fedcba0987654321"
+    v2 = f"{black_frame}:a1a2a3a4a5a6a7a8:b1b2b3b4b5b6b7b8"
+
+    assert is_fingerprint_duplicate(v1, v2) is False
+
+
+@pytest.mark.asyncio
+async def test_prepublish_dedup_against_ignored_and_posted_posts(tmp_path):
+    """
+    Tests that a post is rejected if an identical video was previously POSTED or IGNORED (deleted).
+    """
+    test_db = tmp_path / "test_prepublish_dedup.sqlite"
+    settings.db_path = str(test_db)
+    await init_db()
+
+    target_hash = "ffe7e52143c9cec2:f4949e2ad06847c7:db7fada0f0ff785e"
+    dup_hash = "ffe7e52143c9cec2:f4949a2ad0c065d7:dbffafa0f0ff282f"
+
+    # Save initial tweet as IGNORED (deleted by user)
+    t_deleted = {
+        "tweet_id": "tweet_deleted_01",
+        "author_handle": "@deleted_poster",
+        "text_raw": "Deleted post with plane crash",
+        "tweet_url": "https://x.com/deleted_poster/status/tweet_deleted_01",
+        "created_at": "2026-10-18T10:00:00Z",
+        "video_hash": target_hash
+    }
+    filtered = await filter_new_tweets([t_deleted])
+    await save_raw_tweets(filtered)
+    await update_tweet_status_and_score("tweet_deleted_01", score=10.0, is_viral=False, status="IGNORED")
+
+    # Now verify find_duplicate_video_in_db finds this deleted tweet
+    dup_found = await find_duplicate_video_in_db(dup_hash, exclude_tweet_id="new_tweet_99")
+    assert dup_found is not None
+    assert dup_found["tweet_id"] == "tweet_deleted_01"
+    assert dup_found["status"] == "IGNORED"
+

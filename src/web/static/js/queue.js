@@ -79,8 +79,9 @@ export async function publishNow(tweetId) {
   }
 }
 
-export function deletePost(tweetId) {
-  const post = queueData.find(p => p.tweet_id === tweetId);
+export function deletePost(tweetId, event) {
+  const postsList = Array.isArray(queueData) ? queueData : (queueData?.queue || []);
+  const post = postsList.find(p => p.tweet_id === tweetId);
   const title = post ? (post.summary_data?.title_ru || post.text_raw?.slice(0, 50)) : '';
   const isVideo = Boolean(post && post.video_data);
 
@@ -102,6 +103,11 @@ export function deletePost(tweetId) {
       loadQueue();
     }
   };
+
+  if (event && event.shiftKey) {
+    doDelete();
+    return;
+  }
 
   if (typeof window.showConfirmDialog === 'function') {
     window.showConfirmDialog({
