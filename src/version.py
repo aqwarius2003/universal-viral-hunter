@@ -30,7 +30,7 @@ def get_version() -> str:
             except Exception:
                 pass
 
-    _CACHED_VERSION = "2.2.8"
+    _CACHED_VERSION = "2.3.0"
     return _CACHED_VERSION
 
 
