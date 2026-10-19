@@ -66,3 +66,4 @@ deploy_key*
 interview_answer*.txt
 test_search.py
 uv.lock
+.superpowers/
